@@ -1,0 +1,25 @@
+[package]
+name = "mipoco"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Minimal, performance-focused TUI terminal multiplexer for Claude Code sessions"
+license = "MIT"
+
+[dependencies]
+ratatui = "0.30"
+crossterm = "0.29"
+tui-term = "0.3"
+portable-pty = "0.9"
+vt100 = "0.16"
+opener = "0.8"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+dirs = "6"
+parking_lot = "0.12"
+anyhow = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

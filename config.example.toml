@@ -1,0 +1,33 @@
+# mipoco configuration — copy to:
+#   Linux:   ~/.config/mipoco/config.toml
+#   Windows: %APPDATA%\mipoco\config.toml
+# Every key is optional; this file shows the defaults.
+
+# Shell for new panes. Default: $SHELL on Linux, powershell.exe on Windows.
+#default_shell = "/bin/zsh"
+
+# Open the file explorer panel at startup.
+show_explorer_on_start = false
+
+# Command run by the explorer's c/C ("claude session here") action.
+claude_command = "claude"
+
+# Scrollback lines kept per pane (bounded; primary screen only).
+scrollback = 5000
+
+# Width of the file explorer panel in columns.
+explorer_width = 32
+
+# Close panes immediately when their child exits instead of showing [exited].
+auto_close_exited = false
+
+# Extensions always handed to the OS default opener (browser, viewer, ...).
+# NOTE: must stay above the [runners] table — it is a top-level key.
+#open_with_system = ["html", "htm", "pdf", "png", "jpg", "jpeg", "gif", "svg", "webp", "mp4", "mp3", "webm", "odt", "docx", "xlsx"]
+
+# Runners for "execute file in a pane", keyed by extension.
+# Entries here extend/override the built-in table
+# (py, js, mjs, ts, sh, rb, pl, php, lua on Linux; py, js, ts, ps1, bat on Windows).
+[runners]
+py = "python3"
+#go = "go run"
