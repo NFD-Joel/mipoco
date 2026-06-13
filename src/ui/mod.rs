@@ -61,7 +61,15 @@ fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
                     .is_some_and(|s| s.dirty.load(Ordering::Relaxed))
             });
         let marker = if activity { "*" } else { "" };
-        let label = format!(" {}:{}{} ", i + 1, tab.name, marker);
+        let dir = app
+            .sessions
+            .get(&tab.focus)
+            .and_then(|s| s.cwd())
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+        let label = match dir {
+            Some(d) => format!(" {}:{} {}{} ", i + 1, tab.name, d, marker),
+            None => format!(" {}:{}{} ", i + 1, tab.name, marker),
+        };
         let style = if active {
             Style::new()
                 .fg(Color::Black)
@@ -170,13 +178,13 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from(""),
         help_line("Tabs", "Alt+t new · Alt+Shift+W close · Alt+1..9 jump"),
         help_line("", "Alt+,/. prev/next · Alt+r rename"),
-        help_line("Panes", "Alt+d split right · Alt+s split down · Alt+w close"),
+        help_line("Panes", "Alt+s shell · Alt+c claude split · Alt+w close"),
         help_line("Focus", "Alt+arrows or Alt+hjkl · Alt+z zoom"),
         help_line("", "Alt+Shift+arrows resize"),
         help_line("Explorer", "Alt+e toggle · Enter open · s/c session here"),
         help_line("", "S/C as split · x run · . hidden · Bksp parent"),
         help_line("Scroll", "Alt+PgUp/PgDn or wheel · any input returns live"),
-        help_line("Copy", "Alt+c copy mode · or drag with the mouse"),
+        help_line("Copy", "Alt+y copy mode · or drag with the mouse"),
         help_line("", "Shift+drag = native terminal selection"),
         help_line("Misc", "Alt+o settings · Alt+Shift+L passthrough"),
         help_line("", "Alt+q twice quit · Alt+? this help"),

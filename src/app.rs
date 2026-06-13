@@ -18,6 +18,9 @@ use crate::explorer::Explorer;
 use crate::layout::{NavDir, PaneNode, SplitDir, Tab, directional_focus};
 use crate::pty::{PtySession, SessionId};
 
+/// Direction every split uses (side by side; vertical divider).
+const SPLIT_DIR: SplitDir = SplitDir::Horizontal;
+
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Focus {
     Pane,
@@ -323,18 +326,17 @@ impl App {
                     }
                 }
                 KeyCode::Char('e') => self.toggle_explorer(),
-                KeyCode::Char('d') => {
-                    let cwd = self.focused_cwd();
-                    let (cmd, title) = self.shell_cmd(cwd.as_deref());
-                    self.split_with(SplitDir::Horizontal, cmd, title, false);
-                }
                 KeyCode::Char('s') => {
                     let cwd = self.focused_cwd();
                     let (cmd, title) = self.shell_cmd(cwd.as_deref());
-                    self.split_with(SplitDir::Vertical, cmd, title, false);
+                    self.split_with(SPLIT_DIR, cmd, title, false);
                 }
-                KeyCode::Char('x') => self.close_pane(),
-                KeyCode::Char('c') => self.enter_copy_mode(),
+                KeyCode::Char('c') => {
+                    let cwd = self.focused_cwd();
+                    let (cmd, title) = self.claude_cmd(cwd.as_deref());
+                    self.split_with(SPLIT_DIR, cmd, title, false);
+                }
+                KeyCode::Char('y') => self.enter_copy_mode(),
                 KeyCode::Char('?') => self.show_help = true,
                 KeyCode::Char('L') => {
                     self.passthrough = true;
@@ -561,12 +563,12 @@ impl App {
             KeyCode::Char('S') => {
                 let d = self.explorer.target_dir();
                 let (cmd, title) = self.shell_cmd(Some(&d));
-                self.split_with(SplitDir::Horizontal, cmd, title, false);
+                self.split_with(SPLIT_DIR, cmd, title, false);
             }
             KeyCode::Char('C') => {
                 let d = self.explorer.target_dir();
                 let (cmd, title) = self.claude_cmd(Some(&d));
-                self.split_with(SplitDir::Horizontal, cmd, title, false);
+                self.split_with(SPLIT_DIR, cmd, title, false);
             }
             KeyCode::Char('.') => self.explorer.toggle_hidden(),
             KeyCode::Char('R') => self.explorer.rebuild(),
@@ -656,13 +658,13 @@ impl App {
     }
 
     fn copy_text(&mut self, text: &str) {
-        let text = text.trim_end_matches('\n');
+        let text = tidy_copy(text);
         if text.trim().is_empty() {
             self.status_msg = Some("nothing to copy".into());
             return;
         }
         let n = text.lines().count();
-        let via = clipboard::copy(text);
+        let via = clipboard::copy(&text);
         let plural = if n == 1 { "" } else { "s" };
         self.status_msg = Some(format!("copied {n} line{plural} via {via}"));
     }
@@ -1163,5 +1165,63 @@ impl App {
     fn focused_cwd(&self) -> Option<PathBuf> {
         let id = self.focused_session_id()?;
         self.sessions.get(&id)?.cwd()
+    }
+}
+
+/// Box-drawing vertical bars that TUIs (e.g. Claude) frame their panels with.
+const FRAME_BARS: &[char] = &['│', '┃', '╎', '╏', '┆', '┇', '┊', '┋'];
+
+/// Tidy text grabbed off a terminal screen before it hits the clipboard:
+/// drop right-edge padding and any box-drawing frame the inner app drew around
+/// the selection, while preserving real indentation and ASCII `|` (markdown,
+/// code). Only a single outer frame bar per side is removed.
+fn tidy_copy(text: &str) -> String {
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(|line| {
+            let mut s = line.trim_end();
+            // trailing frame bar + its padding
+            if let Some(rest) = s.strip_suffix(FRAME_BARS) {
+                s = rest.trim_end();
+            }
+            // leading frame bar — only strip when one is actually present, so
+            // ordinary indented lines keep their leading spaces
+            let after_indent = s.trim_start_matches(' ');
+            if let Some(rest) = after_indent.strip_prefix(FRAME_BARS) {
+                rest.strip_prefix(' ').unwrap_or(rest).to_string()
+            } else {
+                s.to_string()
+            }
+        })
+        .collect();
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tidy_copy;
+
+    #[test]
+    fn strips_box_frame() {
+        assert_eq!(tidy_copy("│ hello │"), "hello");
+        assert_eq!(tidy_copy("│ hello world         │"), "hello world");
+    }
+
+    #[test]
+    fn keeps_code_indentation() {
+        assert_eq!(tidy_copy("    let x = 5;"), "    let x = 5;");
+    }
+
+    #[test]
+    fn leaves_ascii_pipes_alone() {
+        assert_eq!(tidy_copy("| a | b |"), "| a | b |");
+    }
+
+    #[test]
+    fn trims_trailing_padding_and_blank_lines() {
+        assert_eq!(tidy_copy("foo   \nbar\n   \n"), "foo\nbar");
     }
 }

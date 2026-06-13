@@ -9,7 +9,7 @@ Runs inside your existing terminal (like a stripped-down Zellij) on **Linux**
 and **Windows** (Windows 10 1809+, via ConPTY).
 
 ```
-┌ 1:claude  2:zsh  3:claude ────────────────────── mipoco ┐
+┌ 1:claude mipoco  2:zsh aev  3:claude dailyrecipes ─ mipoco ┐
 │ ▸ projects/        │ $ claude                           │
 │   ▸ aev/           │ ╭─ Claude Code ──────────────────╮ │
 │   ▾ mipoco/        │ │ > fix the parser bug           │ │
@@ -37,18 +37,18 @@ below goes verbatim to the focused terminal.
 | Keys | Action |
 |---|---|
 | `Alt+t` | new tab |
-| `Alt+w` (or `Alt+x`) | close focused pane — the last pane closes the tab |
+| `Alt+w` | close focused pane — the last pane closes the tab |
 | `Alt+Shift+W` | close the whole tab with all its panes |
 | `Alt+1`…`Alt+9` | jump to tab |
 | `Alt+,` / `Alt+.` (also `Alt+[` / `Alt+]`) | previous / next tab |
 | `Alt+r` | rename tab |
-| `Alt+d` / `Alt+s` | split right / split down |
+| `Alt+s` / `Alt+c` | split with a shell / claude session |
 | `Alt+o` | settings overlay (changes are saved to the config file) |
 | `Alt+arrows` or `Alt+h j k l` | move focus between panes |
 | `Alt+Shift+arrows` | resize split |
 | `Alt+z` | zoom focused pane |
 | `Alt+e` | toggle / focus file explorer |
-| `Alt+c` | copy mode (see below) |
+| `Alt+y` | copy mode (see below) |
 | `Alt+PgUp` / `Alt+PgDn` | scrollback (any input snaps back to live) |
 | `Alt+Shift+L` | passthrough mode: forward *everything*, incl. Alt keys |
 | `Alt+?` | help overlay |
@@ -60,8 +60,9 @@ Selecting with the mouse normally grabs the whole terminal grid — explorer
 panel included. mipoco therefore handles the mouse itself:
 
 - **Drag with the mouse** inside a pane: selects only that pane's text and
-  copies it to the clipboard on release.
-- **`Alt+c` copy mode** (keyboard): `j/k` move (scrolls into scrollback at the
+  copies it to the clipboard on release. Trailing padding and any box-drawing
+  frame the inner app drew (e.g. Claude's panel borders) are stripped.
+- **`Alt+y` copy mode** (keyboard): `j/k` move (scrolls into scrollback at the
   edges), `Space`/`v` mark, `y`/`Enter` yank, `Esc` cancel. Line-wise.
 - Clipboard via `wl-copy`/`xclip`/`xsel` when available, otherwise OSC 52
   (works in most modern terminals, including over SSH).
