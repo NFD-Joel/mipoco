@@ -19,7 +19,39 @@ dirs = "6"
 parking_lot = "0.12"
 anyhow = "1"
 
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
 strip = true
+
+[package.metadata.deb]
+maintainer = "nfd <xaytag@gmail.com>"
+copyright = "2026 nfd, MIT licensed"
+section = "utils"
+priority = "optional"
+extended-description = """\
+mipoco is a minimal terminal multiplexer for running multiple Claude Code and \
+shell sessions side by side in tabs and splits, with an integrated file \
+explorer. It is launched as a windowed app via mipoco-launcher, which opens it \
+in your terminal emulator."""
+# No hard dependency on a specific terminal; suggest common ones.
+recommends = "alacritty | kitty | gnome-terminal | x-terminal-emulator"
+assets = [
+    ["target/release/mipoco", "usr/bin/", "755"],
+    ["packaging/linux/mipoco-launcher", "usr/bin/", "755"],
+    ["packaging/linux/mipoco.desktop", "usr/share/applications/", "644"],
+    ["packaging/linux/icons/hicolor/16x16/apps/mipoco.png", "usr/share/icons/hicolor/16x16/apps/", "644"],
+    ["packaging/linux/icons/hicolor/24x24/apps/mipoco.png", "usr/share/icons/hicolor/24x24/apps/", "644"],
+    ["packaging/linux/icons/hicolor/32x32/apps/mipoco.png", "usr/share/icons/hicolor/32x32/apps/", "644"],
+    ["packaging/linux/icons/hicolor/48x48/apps/mipoco.png", "usr/share/icons/hicolor/48x48/apps/", "644"],
+    ["packaging/linux/icons/hicolor/64x64/apps/mipoco.png", "usr/share/icons/hicolor/64x64/apps/", "644"],
+    ["packaging/linux/icons/hicolor/128x128/apps/mipoco.png", "usr/share/icons/hicolor/128x128/apps/", "644"],
+    ["packaging/linux/icons/hicolor/256x256/apps/mipoco.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
+    ["packaging/linux/icons/hicolor/512x512/apps/mipoco.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
+    ["packaging/linux/icons/hicolor/scalable/apps/mipoco.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["README.md", "usr/share/doc/mipoco/README.md", "644"],
+    ["config.example.toml", "usr/share/doc/mipoco/config.example.toml", "644"],
+]

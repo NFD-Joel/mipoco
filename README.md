@@ -19,7 +19,35 @@ and **Windows** (Windows 10 1809+, via ConPTY).
 └──────────────────────────────────────────────────────────┘
 ```
 
-## Build & install
+## Install
+
+### Ubuntu / Debian — `.deb`
+
+```sh
+sudo apt install ./mipoco_<version>_amd64.deb
+```
+
+Installs `mipoco` + a launcher, and adds **mipoco** to your app menu with an
+icon. Launching it from the menu opens mipoco in a terminal window (it
+auto-detects alacritty, kitty, gnome-terminal, … or set `$MIPOCO_TERMINAL`).
+Uninstall with `sudo apt remove mipoco`.
+
+### Any Linux — AppImage
+
+```sh
+chmod +x mipoco-<version>-x86_64.AppImage
+./mipoco-<version>-x86_64.AppImage
+```
+
+A single portable file — no install. Double-click it (or run it) and it opens
+in a terminal window.
+
+### Windows — installer
+
+Download `mipoco-<version>-setup.exe` and run it: it installs to *Program
+Files* with Start Menu + Desktop shortcuts and a clean uninstaller.
+
+## Build from source
 
 ```sh
 cargo build --release
@@ -27,6 +55,17 @@ install -Dm755 target/release/mipoco ~/.local/bin/mipoco   # or copy anywhere on
 ```
 
 On Windows: `cargo build --release` → `target\release\mipoco.exe`.
+
+### Build the packages
+
+```sh
+cargo deb                               # → target/debian/mipoco_<version>_amd64.deb
+bash packaging/linux/build-appimage.sh  # → target/mipoco-<version>-x86_64.AppImage
+```
+
+The Windows installer is built on Windows with NSIS — see
+[`packaging/windows/README.md`](packaging/windows/README.md). App icons are
+generated from `assets/mipoco.svg` by `python3 packaging/render-icons.py`.
 
 ## Keys
 

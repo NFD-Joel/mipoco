@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=mipoco
+GenericName=Terminal Multiplexer
+Comment=Run Claude Code and shell sessions in tabs and splits
+Exec=mipoco-launcher
+TryExec=mipoco
+Icon=mipoco
+Terminal=false
+Categories=Development;System;TerminalEmulator;
+Keywords=terminal;multiplexer;claude;shell;tabs;splits;tmux;
+StartupWMClass=mipoco
+StartupNotify=true

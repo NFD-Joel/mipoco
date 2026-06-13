@@ -1,0 +1,53 @@
+#!/bin/sh
+# Launch mipoco inside a graphical terminal so it behaves like a normal app
+# when started from a desktop icon / app menu. mipoco is a TUI, so it always
+# needs a terminal to draw in.
+#
+# - Run from a shell (stdout is a tty): exec mipoco directly, no new window.
+# - Launched from the desktop (no tty): open the first available terminal.
+# Override the chosen terminal with $MIPOCO_TERMINAL, the binary with $MIPOCO_BIN.
+set -eu
+
+BIN="${MIPOCO_BIN:-mipoco}"
+APP_ID=mipoco
+TITLE=mipoco
+
+# Already in a terminal? Just run in place (unless forced to spawn a window).
+if [ -t 1 ] && [ -z "${MIPOCO_FORCE_TERMINAL:-}" ]; then
+    exec "$BIN" "$@"
+fi
+
+has() { command -v "$1" >/dev/null 2>&1; }
+
+term="${MIPOCO_TERMINAL:-}"
+if [ -z "$term" ]; then
+    for t in alacritty kitty wezterm ghostty foot konsole gnome-terminal \
+             ptyxis kgx xfce4-terminal tilix x-terminal-emulator xterm; do
+        if has "$t"; then term="$t"; break; fi
+    done
+fi
+
+if [ -z "$term" ]; then
+    echo "mipoco: no terminal emulator found. Install one (e.g. alacritty) or" \
+         "set \$MIPOCO_TERMINAL." >&2
+    exit 1
+fi
+
+# Each terminal spells "set the window class/title and run this command"
+# differently; --class lets the .desktop StartupWMClass attach our icon.
+case "$term" in
+    alacritty)           exec alacritty --class "$APP_ID,$APP_ID" -T "$TITLE" -e "$BIN" "$@" ;;
+    kitty)               exec kitty --class "$APP_ID" -T "$TITLE" "$BIN" "$@" ;;
+    wezterm)             exec wezterm start --class "$APP_ID" -- "$BIN" "$@" ;;
+    ghostty)             exec ghostty --class="$APP_ID" --title="$TITLE" -e "$BIN" "$@" ;;
+    foot)                exec foot --app-id="$APP_ID" --title="$TITLE" "$BIN" "$@" ;;
+    konsole)             exec konsole -p tabtitle="$TITLE" -e "$BIN" "$@" ;;
+    gnome-terminal)      exec gnome-terminal --title="$TITLE" -- "$BIN" "$@" ;;
+    ptyxis)              exec ptyxis -- "$BIN" "$@" ;;
+    kgx)                 exec kgx -- "$BIN" "$@" ;;
+    xfce4-terminal)      exec xfce4-terminal --title="$TITLE" -x "$BIN" "$@" ;;
+    tilix)               exec tilix -t "$TITLE" -e "$BIN" "$@" ;;
+    x-terminal-emulator) exec x-terminal-emulator -e "$BIN" "$@" ;;
+    xterm)               exec xterm -class "$APP_ID" -T "$TITLE" -e "$BIN" "$@" ;;
+    *)                   exec "$term" -e "$BIN" "$@" ;;
+esac
