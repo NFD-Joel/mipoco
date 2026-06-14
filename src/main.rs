@@ -7,6 +7,7 @@ mod explorer;
 mod layout;
 mod pty;
 mod ui;
+mod viewer;
 
 use std::io::stdout;
 use std::sync::mpsc;
@@ -30,7 +31,7 @@ fn main() -> Result<()> {
             _ => {
                 println!("mipoco {} — minimal terminal multiplexer", env!("CARGO_PKG_VERSION"));
                 println!("usage: mipoco            start (no arguments)");
-                println!("       inside the app:   Alt+? keys · Alt+o settings · Alt+q twice quits");
+                println!("       inside the app:   Alt+? keys · Alt+o settings · Alt+q close pane");
                 return Ok(());
             }
         }

@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, Paragraph};
 use tui_term::widget::{Cursor, PseudoTerminal};
 
 use crate::app::{App, Focus};
+use crate::viewer::Viewer;
 
 pub fn render_all(f: &mut Frame, app: &App) {
     let Some(tab) = app.tabs.get(app.active_tab) else {
@@ -14,10 +15,14 @@ pub fn render_all(f: &mut Frame, app: &App) {
         if rect.width == 0 || rect.height == 0 {
             continue;
         }
+        let focused = *id == tab.focus && app.focus == Focus::Pane;
+        if let Some(v) = app.viewers.get(id) {
+            render_viewer(f, v, *rect, focused, *id == tab.focus);
+            continue;
+        }
         let Some(sess) = app.sessions.get(id) else {
             continue;
         };
-        let focused = *id == tab.focus && app.focus == Focus::Pane;
 
         let inner = if app.bordered {
             let border_style = if focused {
@@ -115,6 +120,44 @@ pub fn render_all(f: &mut Frame, app: &App) {
             if row < inner.height && col < inner.width {
                 f.set_cursor_position(Position::new(inner.x + col, inner.y + row));
             }
+        }
+    }
+}
+
+/// Render a built-in viewer pane: a titled, bordered frame with the file's
+/// pre-wrapped text laid out inside its content area (margins + top padding).
+fn render_viewer(f: &mut Frame, v: &Viewer, rect: Rect, focused: bool, tab_focus: bool) {
+    let border_style = if focused {
+        Style::new().fg(Color::Cyan)
+    } else if tab_focus {
+        Style::new().fg(Color::Blue)
+    } else {
+        Style::new().fg(Color::DarkGray)
+    };
+    let block = Block::bordered()
+        .border_style(border_style)
+        .title(format!(" {} ", v.title));
+    f.render_widget(block, rect);
+
+    let content = Viewer::content_rect(rect, true);
+    if content.width == 0 || content.height == 0 {
+        return;
+    }
+    f.render_widget(Paragraph::new(v.visible().to_vec()), content);
+
+    if let Some(pct) = v.percent() {
+        let tag = format!(" {pct}% ");
+        let w = tag.chars().count() as u16;
+        if rect.width > w + 2 {
+            f.render_widget(
+                Paragraph::new(tag).style(Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Rect {
+                    x: rect.x + rect.width - w - 1,
+                    y: rect.y,
+                    width: w,
+                    height: 1,
+                },
+            );
         }
     }
 }

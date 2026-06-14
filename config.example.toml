@@ -15,8 +15,14 @@ show_explorer_on_start = false
 # PATH (e.g. ~/.npm-global/bin) even when mipoco starts from a desktop icon.
 claude_command = "claude"
 
-# Pager used to view text/markdown files inside a pane (v in the explorer, or
-# any view_with_pager extension). Try "glow -p" or "bat" for rendered markdown.
+# How text/markdown files open (v in the explorer, or any view_with_pager
+# extension): "builtin" = mipoco's own reader (word-wrapped, margins, comfortable
+# spacing); "external" = a pager in a pane.
+viewer = "builtin"
+
+# External pager, used only when viewer = "external". mipoco auto-picks a nicer
+# tool when installed — "glow -p" for markdown, "bat" for code/text — and falls
+# back to this otherwise.
 pager = "less -R"
 
 # Scrollback lines kept per pane (bounded; primary screen only).

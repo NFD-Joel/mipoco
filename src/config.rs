@@ -3,6 +3,33 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// How text/markdown files open from the explorer (`v`) and on execute.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewerMode {
+    /// mipoco's built-in reader: word-wrapped, margins, comfortable spacing.
+    Builtin,
+    /// An external pager in a pane (auto-picks glow/bat when present, else `pager`).
+    External,
+}
+
+impl ViewerMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            ViewerMode::Builtin => "builtin",
+            ViewerMode::External => "external",
+        }
+    }
+
+    /// Cycle to the other mode (settings toggle).
+    pub fn toggled(self) -> Self {
+        match self {
+            ViewerMode::Builtin => ViewerMode::External,
+            ViewerMode::External => ViewerMode::Builtin,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
@@ -12,8 +39,10 @@ pub struct Config {
     pub show_explorer_on_start: bool,
     /// Command used by the explorer's "claude session here" action.
     pub claude_command: String,
-    /// Pager used to view text/markdown files inside a mipoco pane.
-    /// Set to e.g. "glow -p" or "bat" for rendered markdown if installed.
+    /// How text/markdown files open: the built-in reader or an external pager.
+    pub viewer: ViewerMode,
+    /// Pager used in `external` viewer mode when neither glow nor bat is found.
+    /// Set to e.g. "glow -p" or "bat" to force a specific external viewer.
     pub pager: String,
     /// Scrollback lines kept per pane (bounded; primary screen only).
     pub scrollback: usize,
@@ -34,6 +63,7 @@ impl Default for Config {
             default_shell: None,
             show_explorer_on_start: false,
             claude_command: "claude".into(),
+            viewer: ViewerMode::Builtin,
             pager: "less -R".into(),
             scrollback: 5000,
             explorer_width: 32,

@@ -145,6 +145,8 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
                 if let Some(cwd) = s.cwd() {
                     left.push_str(&format!(" · {}", tilde(&cwd.display().to_string())));
                 }
+            } else if let Some(v) = app.viewers.get(&tab.focus) {
+                left.push_str(&format!(" {} · j/k scroll · Alt+q close", v.title));
             }
             if tab.zoomed {
                 left.push_str(" · ZOOM");
@@ -176,20 +178,20 @@ fn tilde(path: &str) -> String {
 fn render_help(f: &mut Frame, area: Rect) {
     let lines = vec![
         Line::from(""),
-        help_line("Tabs", "Alt+t new · Alt+Shift+W close · Alt+1..9 jump"),
+        help_line("Tabs", "Alt+t new · Alt+Shift+Q close · Alt+1..9 jump"),
         help_line("", "Alt+,/. prev/next · Alt+r rename"),
         help_line("Panes", "Alt+s shell · Alt+c claude · Alt+b claude bypass"),
-        help_line("", "Alt+w close split"),
+        help_line("", "Alt+q close pane"),
         help_line("Focus", "Alt+arrows or Alt+hjkl · Alt+z zoom"),
         help_line("", "Alt+Shift+arrows resize"),
         help_line("Explorer", "Alt+e toggle · Enter open · s/c session here"),
         help_line("", "S/C split · b/B claude bypass · v view file"),
         help_line("", "x run · . hidden · Bksp parent"),
         help_line("Scroll", "Alt+PgUp/PgDn or wheel · any input returns live"),
+        help_line("Viewer", "j/k or wheel scroll · g/G top/bottom · Alt+q close"),
         help_line("Copy", "Alt+y copy mode · or drag with the mouse"),
         help_line("", "Shift+drag = native terminal selection"),
-        help_line("Misc", "Alt+o settings · Alt+Shift+L passthrough"),
-        help_line("", "Alt+q twice quit · Alt+? this help"),
+        help_line("Misc", "Alt+o settings · Alt+Shift+L passthrough · Alt+? help"),
         Line::from(""),
         Line::from(Span::styled(
             "  everything else goes to the focused terminal",

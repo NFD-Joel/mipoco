@@ -11,12 +11,13 @@ use portable_pty::CommandBuilder;
 use ratatui::layout::{Margin, Position, Rect};
 
 use crate::clipboard;
-use crate::config::Config;
+use crate::config::{Config, ViewerMode};
 use crate::event::{AppEvent, encode_key, encode_mouse};
 use crate::exec::{self, ExecOutcome};
 use crate::explorer::Explorer;
 use crate::layout::{NavDir, PaneNode, SplitDir, Tab, directional_focus};
 use crate::pty::{PtySession, SessionId};
+use crate::viewer::{Viewer, WrapMode};
 
 /// Direction every split uses (side by side; vertical divider).
 const SPLIT_DIR: SplitDir = SplitDir::Horizontal;
@@ -30,6 +31,8 @@ pub enum Focus {
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum SettingKind {
     Bool,
+    /// A fixed set of values cycled with Enter/Space (e.g. viewer mode).
+    Choice,
     Number,
     Text,
 }
@@ -65,7 +68,11 @@ pub const SETTINGS: &[SettingDef] = &[
         kind: SettingKind::Text,
     },
     SettingDef {
-        label: "pager",
+        label: "text viewer",
+        kind: SettingKind::Choice,
+    },
+    SettingDef {
+        label: "external pager",
         kind: SettingKind::Text,
     },
 ];
@@ -108,6 +115,8 @@ impl MouseSel {
 pub struct App {
     pub config: Config,
     pub sessions: HashMap<SessionId, PtySession>,
+    /// Built-in viewer panes, keyed by the same id space as `sessions`.
+    pub viewers: HashMap<SessionId, Viewer>,
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
     pub focus: Focus,
@@ -126,7 +135,6 @@ pub struct App {
     pub copy_mode: Option<CopyMode>,
     pub mouse_sel: Option<MouseSel>,
     pub renaming: Option<String>,
-    pub pending_quit: bool,
     pub status_msg: Option<String>,
     pub should_quit: bool,
     next_id: SessionId,
@@ -141,6 +149,7 @@ impl App {
         let mut app = Self {
             config,
             sessions: HashMap::new(),
+            viewers: HashMap::new(),
             tabs: Vec::new(),
             active_tab: 0,
             focus: Focus::Pane,
@@ -157,7 +166,6 @@ impl App {
             copy_mode: None,
             mouse_sel: None,
             renaming: None,
-            pending_quit: false,
             status_msg: None,
             should_quit: false,
             next_id: 0,
@@ -217,6 +225,11 @@ impl App {
                 };
                 if let Some(s) = self.sessions.get_mut(id) {
                     s.resize(inner.height.max(1), inner.width.max(1));
+                } else if let Some(v) = self.viewers.get_mut(id) {
+                    // viewers are always framed; lay text out in the content area
+                    let c = Viewer::content_rect(*r, true);
+                    v.relayout(c.width);
+                    v.set_view_h(c.height);
                 }
             }
             if ti == self.active_tab {
@@ -292,28 +305,15 @@ impl App {
             return;
         }
 
-        if self.pending_quit {
-            self.pending_quit = false;
-            if alt && key.code == KeyCode::Char('q') {
-                self.should_quit = true;
-                return;
-            }
-            // any other key cancels the quit and is handled normally
-        }
-
         if alt {
             match key.code {
-                KeyCode::Char('q') => {
-                    self.pending_quit = true;
-                    self.status_msg = Some("press Alt+q again to quit".into());
-                }
+                KeyCode::Char('q') => self.close_pane(),
+                KeyCode::Char('Q') => self.close_tab(),
                 KeyCode::Char('t') => {
                     let cwd = self.focused_cwd();
                     let (cmd, title) = self.shell_cmd(cwd.as_deref());
                     self.new_tab_with(cmd, title);
                 }
-                KeyCode::Char('w') => self.close_pane(),
-                KeyCode::Char('W') => self.close_tab(),
                 KeyCode::Char('o') => {
                     self.settings_open = true;
                     self.settings_sel = 0;
@@ -379,7 +379,27 @@ impl App {
 
         match self.focus {
             Focus::Explorer => self.handle_explorer_key(&key),
-            Focus::Pane => self.forward_key(&key),
+            Focus::Pane => match self.focused_viewer_id() {
+                Some(id) => self.handle_viewer_key(id, &key),
+                None => self.forward_key(&key),
+            },
+        }
+    }
+
+    /// Scroll keys for a focused built-in viewer pane. The pane closes with
+    /// `Alt+q` like any other pane (handled in the Alt branch).
+    fn handle_viewer_key(&mut self, id: SessionId, key: &KeyEvent) {
+        let Some(v) = self.viewers.get_mut(&id) else {
+            return;
+        };
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => v.scroll_by(1),
+            KeyCode::Char('k') | KeyCode::Up => v.scroll_by(-1),
+            KeyCode::Char(' ') | KeyCode::Char('f') | KeyCode::PageDown => v.page(true),
+            KeyCode::Char('b') | KeyCode::PageUp => v.page(false),
+            KeyCode::Char('g') | KeyCode::Home => v.scroll_top(),
+            KeyCode::Char('G') | KeyCode::End => v.scroll_bottom(),
+            _ => {}
         }
     }
 
@@ -394,7 +414,8 @@ impl App {
             3 => self.config.scrollback.to_string(),
             4 => self.config.default_shell.clone().unwrap_or_default(),
             5 => self.config.claude_command.clone(),
-            6 => self.config.pager.clone(),
+            6 => self.config.viewer.label().to_string(),
+            7 => self.config.pager.clone(),
             _ => String::new(),
         }
     }
@@ -440,6 +461,10 @@ impl App {
                     self.toggle_bool_setting();
                     self.save_config();
                 }
+                SettingKind::Choice => {
+                    self.cycle_choice_setting();
+                    self.save_config();
+                }
                 _ => self.settings_edit = Some(self.setting_value(self.settings_sel)),
             },
             _ => {}
@@ -458,6 +483,12 @@ impl App {
             }
             1 => self.config.auto_close_exited = !self.config.auto_close_exited,
             _ => {}
+        }
+    }
+
+    fn cycle_choice_setting(&mut self) {
+        if self.settings_sel == 6 {
+            self.config.viewer = self.config.viewer.toggled();
         }
     }
 
@@ -492,7 +523,7 @@ impl App {
                 }
                 self.config.claude_command = val.to_string();
             }
-            6 => {
+            7 => {
                 if val.is_empty() {
                     self.status_msg = Some("pager cannot be empty".into());
                     return;
@@ -770,6 +801,16 @@ impl App {
             }
         }
 
+        // built-in viewer panes: wheel scrolls the document
+        if let Some(v) = self.viewers.get_mut(&id) {
+            match m.kind {
+                MouseEventKind::ScrollUp => v.scroll_by(-3),
+                MouseEventKind::ScrollDown => v.scroll_by(3),
+                _ => {}
+            }
+            return;
+        }
+
         let (prow, pcol) = (m.row - inner.y, m.column - inner.x);
         let Some(sess) = self.sessions.get_mut(&id) else {
             return;
@@ -954,6 +995,10 @@ impl App {
         let Some(id) = self.focused_session_id() else {
             return;
         };
+        if let Some(v) = self.viewers.get_mut(&id) {
+            v.page(!up); // PageUp moves toward the top of the document
+            return;
+        }
         let Some(sess) = self.sessions.get(&id) else {
             return;
         };
@@ -1093,6 +1138,7 @@ impl App {
         let tab = self.tabs.remove(self.active_tab);
         for id in tab.leaves() {
             self.sessions.remove(&id);
+            self.viewers.remove(&id);
         }
         if self.tabs.is_empty() {
             self.should_quit = true;
@@ -1111,6 +1157,7 @@ impl App {
 
     pub fn remove_session(&mut self, id: SessionId) {
         self.sessions.remove(&id);
+        self.viewers.remove(&id);
         let Some(ti) = self.tabs.iter().position(|t| t.root.contains(id)) else {
             return;
         };
@@ -1208,24 +1255,78 @@ impl App {
                 self.status_msg = Some(format!("opened {name} with system handler"));
             }
             Ok(ExecOutcome::Run { cmd, title }) => {
-                self.split_with(SplitDir::Vertical, cmd, title, true);
+                self.split_with(SPLIT_DIR, cmd, title, true);
             }
+            Ok(ExecOutcome::View(p)) => self.view_file(&p),
             Err(e) => self.status_msg = Some(format!("exec failed: {e}")),
         }
     }
 
-    /// Open a file in the configured pager inside a split pane. Scroll with the
-    /// pager's own keys (arrows / PgUp / PgDn / mouse wheel); zoom is the
-    /// terminal's own font zoom (Ctrl +/-). The pane closes when the pager quits.
+    /// Open a text/markdown file in a split pane next to the current one.
+    /// In `builtin` viewer mode it opens mipoco's reader (word-wrapped, with
+    /// margins); in `external` mode it spawns a pager (glow/bat/less).
     fn view_file(&mut self, path: &Path) {
-        let ExecOutcome::Run { cmd, title } = exec::view(path, &self.config) else {
-            return;
+        match self.config.viewer {
+            ViewerMode::Builtin => self.open_builtin_viewer(path),
+            ViewerMode::External => {
+                let (cmd, title) = exec::view(path, &self.config);
+                self.split_with(SPLIT_DIR, cmd, title, true);
+            }
+        }
+    }
+
+    fn open_builtin_viewer(&mut self, path: &Path) {
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                self.status_msg = Some(format!("cannot view {}: {e}", path.display()));
+                return;
+            }
         };
-        self.split_with(SplitDir::Vertical, cmd, title, true);
+        let content = String::from_utf8_lossy(&bytes);
+        let title = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "view".into());
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_lowercase)
+            .unwrap_or_default();
+        let viewer = Viewer::new(title, &content, WrapMode::for_ext(&ext));
+        self.spawn_viewer(viewer);
+    }
+
+    /// Place a built-in viewer as a split next to the focused pane (or in a new
+    /// tab when none exists).
+    fn spawn_viewer(&mut self, viewer: Viewer) {
+        let id = self.alloc_id();
+        let name = viewer.title.clone();
+        self.viewers.insert(id, viewer);
+        if self.tabs.is_empty() {
+            self.tabs.push(Tab::new(name, id));
+            self.active_tab = self.tabs.len() - 1;
+            self.focus = Focus::Pane;
+            return;
+        }
+        let tab = &mut self.tabs[self.active_tab];
+        if tab.root.split(tab.focus, SPLIT_DIR, id) {
+            tab.focus = id;
+            tab.zoomed = false;
+            self.focus = Focus::Pane;
+        } else {
+            self.viewers.remove(&id);
+        }
     }
 
     fn focused_session_id(&self) -> Option<SessionId> {
         self.tabs.get(self.active_tab).map(|t| t.focus)
+    }
+
+    /// The focused pane's id if it is a built-in viewer (not a PTY session).
+    fn focused_viewer_id(&self) -> Option<SessionId> {
+        let id = self.focused_session_id()?;
+        self.viewers.contains_key(&id).then_some(id)
     }
 
     fn focused_cwd(&self) -> Option<PathBuf> {

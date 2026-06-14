@@ -76,8 +76,8 @@ below goes verbatim to the focused terminal.
 | Keys | Action |
 |---|---|
 | `Alt+t` | new tab |
-| `Alt+w` | close focused pane — the last pane closes the tab |
-| `Alt+Shift+W` | close the whole tab with all its panes |
+| `Alt+q` | close focused pane — closing the last pane quits mipoco |
+| `Alt+Shift+Q` | close the whole tab with all its panes |
 | `Alt+1`…`Alt+9` | jump to tab |
 | `Alt+,` / `Alt+.` (also `Alt+[` / `Alt+]`) | previous / next tab |
 | `Alt+r` | rename tab |
@@ -92,7 +92,6 @@ below goes verbatim to the focused terminal.
 | `Alt+PgUp` / `Alt+PgDn` | scrollback (any input snaps back to live) |
 | `Alt+Shift+L` | passthrough mode: forward *everything*, incl. Alt keys |
 | `Alt+?` | help overlay |
-| `Alt+q` twice | quit |
 
 ### Copying text
 
@@ -128,7 +127,7 @@ panel included. mipoco therefore handles the mouse itself:
 | `c` / `s` | new **claude** / shell tab in the selected folder |
 | `C` / `S` | same, but as a split next to the current pane |
 | `b` / `B` | claude in **bypass mode** (`--dangerously-skip-permissions`), as a tab / split |
-| `v` | **view** the selected file in the pager (scrollable, inside a pane) |
+| `v` | **view** the selected file in the text viewer (scrollable, inside a pane) |
 | `x` | execute the selected file |
 | `.` | toggle hidden files |
 | `R` | refresh |
@@ -142,16 +141,23 @@ panel included. mipoco therefore handles the mouse itself:
 - Extensions with a configured runner (`py`, `js`, `sh`, …) run **inside a new
   pane**; the pane shows `[exit: N] press Enter to close` when done.
 - Extensions in `view_with_pager` (md, txt, log, json, code, …) open in the
-  pager **inside a pane** — scroll with the pager's keys / mouse wheel, zoom
-  with your terminal's font zoom, quit (`q` in `less`) to close the pane.
+  **text viewer inside a pane** (a horizontal split, like every other pane).
   Press `v` in the explorer to view any file this way regardless of extension.
+  Scroll with `j`/`k`, arrows, `Space`/`b`, `g`/`G` or the mouse wheel; `Alt+q`
+  closes the pane like any other.
+  - With `viewer = "builtin"` (default) mipoco renders the text itself:
+    word-wrapped (no cut-off words), with side margins and comfortable spacing.
+  - With `viewer = "external"` it opens a pager in the pane instead, auto-picking
+    `glow` for markdown and `bat` for code/text when installed (syntax
+    highlighting), else falling back to `pager` (`less -R`).
 - Anything else falls back to the OS default opener.
 
 ## Configuration
 
 Press `Alt+o` for the in-app settings overlay — explorer-on-start, explorer
-width, scrollback, shell, claude command, pager, auto-close. Changes apply
-immediately and are written to the config file.
+width, scrollback, shell, claude command, text viewer (builtin/external),
+external pager, auto-close. Changes apply immediately and are written to the
+config file.
 
 The file lives at `~/.config/mipoco/config.toml` (Linux) or
 `%APPDATA%\mipoco\config.toml` (Windows) and can also be edited by hand
@@ -163,7 +169,8 @@ See [config.example.toml](config.example.toml):
 # default_shell = "/bin/zsh"     # default: $SHELL (Linux), powershell (Windows)
 show_explorer_on_start = false   # open the file explorer panel at startup
 claude_command = "claude"        # what the c/C and Alt+c actions run
-pager = "less -R"                # viewer for text/md files; try "glow -p" or "bat"
+viewer = "builtin"               # text viewer: "builtin" (in-app) or "external"
+pager = "less -R"                # external-mode fallback (auto-picks glow/bat)
 scrollback = 5000                # lines kept per pane (primary screen only)
 explorer_width = 32
 auto_close_exited = false        # close panes immediately when their child exits

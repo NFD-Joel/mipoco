@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use portable_pty::CommandBuilder;
@@ -10,6 +10,9 @@ pub enum ExecOutcome {
     Opened,
     /// Should run inside a mipoco pane.
     Run { cmd: CommandBuilder, title: String },
+    /// A text/markdown file to open in the viewer (built-in or external,
+    /// decided by `config.viewer` in the app layer).
+    View(PathBuf),
 }
 
 pub fn execute(path: &Path, config: &Config) -> Result<ExecOutcome> {
@@ -35,25 +38,51 @@ pub fn execute(path: &Path, config: &Config) -> Result<ExecOutcome> {
     }
 
     if config.view_with_pager.contains(&ext) {
-        return Ok(view(path, config));
+        return Ok(ExecOutcome::View(path.to_path_buf()));
     }
 
     opener::open(path)?;
     Ok(ExecOutcome::Opened)
 }
 
-/// View a file in the configured pager inside a pane, regardless of extension.
-/// Used by the explorer's "view" action and for `view_with_pager` extensions.
-pub fn view(path: &Path, config: &Config) -> ExecOutcome {
+/// Build the external-pager command for a file (the `external` viewer mode).
+/// Auto-picks a purpose-built tool when installed — `glow` for markdown, `bat`
+/// for code/text (syntax highlighting + line gutter) — otherwise falls back to
+/// the configured `pager` (`less -R`).
+pub fn view(path: &Path, config: &Config) -> (CommandBuilder, String) {
     let title = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "view".into());
     let cwd = path.parent().unwrap_or(Path::new("."));
-    ExecOutcome::Run {
-        cmd: pager_cmd(&config.shell(), &config.pager, path, cwd),
-        title,
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    let pager = external_pager(&ext, &config.pager);
+    (pager_cmd(&config.shell(), &pager, path, cwd), title)
+}
+
+/// Choose the external pager command for `ext`, preferring installed tools.
+fn external_pager(ext: &str, fallback: &str) -> String {
+    if matches!(ext, "md" | "markdown") && which("glow") {
+        return "glow -p".into();
     }
+    // bat ships as `batcat` on Debian/Ubuntu.
+    for bat in ["bat", "batcat"] {
+        if which(bat) {
+            return format!("{bat} --style=full --paging=always");
+        }
+    }
+    fallback.to_string()
+}
+
+/// Whether `name` is an executable found on PATH.
+fn which(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|p| p.join(name).is_file()))
+        .unwrap_or(false)
 }
 
 /// Build the pager command. On Unix it runs through an interactive login shell
