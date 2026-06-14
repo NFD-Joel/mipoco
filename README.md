@@ -187,9 +187,10 @@ When `check_updates` is on, mipoco checks GitHub for a newer release on startup
 shows `vX.Y.Z available · Alt+u`. `Alt+u` opens an overlay to **[u]** upgrade
 (downloads the matching release asset and replaces the running binary) or
 **[c]** view the changelog. Works on Linux, macOS and Windows (`curl`/`tar`
-ship with all three). If the binary isn't writable — a root-owned `.deb` in
-`/usr/bin`, or a Program Files install on Windows — it can't self-replace and
-falls back to opening the releases page for a manual download.
+ship with all three; the Windows installer is per-user, so updates need no
+admin). If the binary isn't writable — e.g. a root-owned `.deb` in `/usr/bin` —
+it can't self-replace and falls back to opening the releases page for a manual
+download.
 
 For `[u]` to work, each GitHub Release must include an archive asset for the
 target whose name contains the arch + OS, with `mipoco`/`mipoco.exe` inside:

@@ -1,0 +1,75 @@
+name: release
+
+# Builds and publishes a GitHub Release with all installable artifacts:
+#   - Windows: NSIS installer (.exe) + a .zip for the in-app updater
+#   - Linux:   .deb + a .tar.gz for the in-app updater
+#
+# Trigger by pushing a version tag, e.g.:
+#   git tag v0.7.1 && git push origin v0.7.1
+# or run it manually from the Actions tab, passing the tag to release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build & release (e.g. v0.7.1) — must already exist"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release
+      - name: Build NSIS installer + updater zip
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag || github.ref_name }}"
+          $ver = $tag.TrimStart('v')
+          choco install nsis -y --no-progress
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          & $makensis "/DVERSION=$ver" packaging/windows/mipoco.nsi
+          Compress-Archive -Path target/release/mipoco.exe `
+            -DestinationPath mipoco-x86_64-pc-windows-msvc.zip -Force
+      - name: Publish Windows assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: |
+            packaging/windows/mipoco-*-setup.exe
+            mipoco-x86_64-pc-windows-msvc.zip
+          fail_on_unmatched_files: true
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release
+      - name: Build .deb + updater tarball
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb
+          tar -czf mipoco-x86_64-unknown-linux-gnu.tar.gz -C target/release mipoco
+      - name: Publish Linux assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: |
+            target/debian/*.deb
+            mipoco-x86_64-unknown-linux-gnu.tar.gz
+          fail_on_unmatched_files: true

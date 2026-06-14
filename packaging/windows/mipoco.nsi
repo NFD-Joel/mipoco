@@ -3,6 +3,10 @@
 ; Produces mipoco-<version>-setup.exe with Start Menu + Desktop shortcuts,
 ; an icon, and a clean uninstaller registered in Add/Remove Programs.
 ; Paths are relative to this script's folder (packaging\windows).
+;
+; Per-user install (no admin / UAC): goes to %LOCALAPPDATA%\Programs\mipoco,
+; which the user can write to — so the in-app updater (Alt+u) can self-replace
+; the binary without elevation.
 
 Unicode true
 !include "MUI2.nsh"
@@ -17,9 +21,9 @@ Unicode true
 
 Name "${APP}"
 OutFile "${APP}-${VERSION}-setup.exe"
-InstallDir "$PROGRAMFILES64\${APP}"
-InstallDirRegKey HKLM "Software\${APP}" "InstallDir"
-RequestExecutionLevel admin
+InstallDir "$LOCALAPPDATA\Programs\${APP}"
+InstallDirRegKey HKCU "Software\${APP}" "InstallDir"
+RequestExecutionLevel user
 
 !define MUI_ICON "mipoco.ico"
 !define MUI_UNICON "mipoco.ico"
@@ -42,16 +46,16 @@ Section "mipoco (required)" SecMain
   File "mipoco.ico"
   File "..\..\README.md"
 
-  WriteRegStr HKLM "Software\${APP}" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\${APP}" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
-  WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "${APP}"
-  WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKLM "${UNINST_KEY}" "Publisher" "${PUBLISHER}"
-  WriteRegStr HKLM "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${EXE}"
-  WriteRegStr HKLM "${UNINST_KEY}" "UninstallString" "$INSTDIR\uninstall.exe"
-  WriteRegDWORD HKLM "${UNINST_KEY}" "NoModify" 1
-  WriteRegDWORD HKLM "${UNINST_KEY}" "NoRepair" 1
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${APP}"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${PUBLISHER}"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${EXE}"
+  WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" "$INSTDIR\uninstall.exe"
+  WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
+  WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
 SectionEnd
 
 Section "Start Menu shortcut" SecStartMenu
@@ -70,6 +74,6 @@ Section "Uninstall"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${APP}.lnk"
   Delete "$DESKTOP\${APP}.lnk"
-  DeleteRegKey HKLM "${UNINST_KEY}"
-  DeleteRegKey HKLM "Software\${APP}"
+  DeleteRegKey HKCU "${UNINST_KEY}"
+  DeleteRegKey HKCU "Software\${APP}"
 SectionEnd

@@ -1,8 +1,23 @@
 # Building the mipoco Windows installer
 
-Do this on a Windows PC. It produces `mipoco-<version>-setup.exe`, an installer
-that puts mipoco in *Program Files*, adds Start Menu + Desktop shortcuts with the
-app icon, and registers a clean uninstaller in *Add/Remove Programs*.
+The installer `mipoco-<version>-setup.exe` is a **per-user** install: it goes to
+`%LOCALAPPDATA%\Programs\mipoco` (no admin / no UAC prompt), adds Start Menu +
+Desktop shortcuts with the app icon, and registers a clean uninstaller in
+*Add/Remove Programs*. Because that folder is user-writable, the in-app updater
+(`Alt+u`) can self-replace the binary without elevation.
+
+## Easiest: let CI build it for you
+
+You don't need a Windows PC. The GitHub Actions workflow
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml) builds the
+Windows installer + updater `.zip` (and the Linux `.deb` + `.tar.gz`) on a
+Windows runner and attaches them to a GitHub Release. Just push a version tag:
+
+```bash
+git tag v0.7.1 && git push origin v0.7.1
+```
+
+The rest of this file is for building the installer **manually on a Windows PC**.
 
 ## 1. One-time setup
 
@@ -53,9 +68,9 @@ Compress-Archive -Path target\release\mipoco.exe `
 ```
 
 Attach that `.zip` to the same GitHub Release as the Linux
-`mipoco-x86_64-unknown-linux-gnu.tar.gz`. Note: a Program Files install can't
-self-replace without admin rights, so it falls back to opening the releases
-page — install to a user-writable folder if you want one-click updates.
+`mipoco-x86_64-unknown-linux-gnu.tar.gz`. (The CI workflow above does this
+automatically.) Since the installer is per-user, `Alt+u` updates apply without
+admin rights.
 
 ## Notes
 
@@ -63,7 +78,7 @@ page — install to a user-writable folder if you want one-click updates.
   own console window — that's the app. For a nicer window, run it inside
   [Windows Terminal](https://aka.ms/terminal): `wt mipoco`.
 - To run `mipoco` from any shell, add the install folder
-  (`C:\Program Files\mipoco`) to your `PATH`, or use the
+  (`%LOCALAPPDATA%\Programs\mipoco`) to your `PATH`, or use the
   [Scoop](https://scoop.sh)/`cargo install` route instead.
 - Prefer an **MSI**? Install [`cargo-wix`](https://github.com/volks73/cargo-wix)
   and the WiX Toolset, then `cargo wix init` + `cargo wix`. NSIS is the
