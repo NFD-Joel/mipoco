@@ -35,6 +35,14 @@ impl ViewerMode {
 pub struct Config {
     /// Shell for new panes. Defaults to $SHELL (Unix) or powershell/%COMSPEC% (Windows).
     pub default_shell: Option<String>,
+    /// Whether the first-run setup wizard has been completed. When false, the
+    /// wizard runs on startup; finishing it sets this true.
+    pub setup_complete: bool,
+    /// Folders the explorer is allowed to browse (its top level and upper
+    /// boundary — it cannot navigate above these). Defaults to the home dir.
+    pub explorer_roots: Vec<PathBuf>,
+    /// Check GitHub for a newer release on startup and offer to upgrade.
+    pub check_updates: bool,
     /// Show the file explorer panel when the app starts.
     pub show_explorer_on_start: bool,
     /// Command used by the explorer's "claude session here" action.
@@ -61,6 +69,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             default_shell: None,
+            setup_complete: false,
+            explorer_roots: default_explorer_roots(),
+            check_updates: true,
             show_explorer_on_start: false,
             claude_command: "claude".into(),
             viewer: ViewerMode::Builtin,
@@ -86,6 +97,28 @@ impl Default for Config {
             .collect(),
         }
     }
+}
+
+/// Expand a leading `~` to the home directory.
+pub(crate) fn expand_tilde(input: &str) -> PathBuf {
+    if let Some(home) = dirs::home_dir() {
+        if input == "~" {
+            return home;
+        }
+        if let Some(rest) = input.strip_prefix("~/") {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(input)
+}
+
+/// Default explorer allowlist: the user's home directory (or the cwd if home
+/// can't be resolved).
+pub(crate) fn default_explorer_roots() -> Vec<PathBuf> {
+    let dir = dirs::home_dir()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    vec![dir]
 }
 
 fn default_runners() -> HashMap<String, String> {
@@ -137,6 +170,12 @@ pub fn load() -> (Config, Option<String>) {
                 for (k, v) in default_runners() {
                     cfg.runners.entry(k).or_insert(v);
                 }
+                // allow `~` in hand-written explorer roots
+                cfg.explorer_roots = cfg
+                    .explorer_roots
+                    .iter()
+                    .map(|p| expand_tilde(&p.to_string_lossy()))
+                    .collect();
                 (cfg, None)
             }
             Err(e) => (

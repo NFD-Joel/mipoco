@@ -6,6 +6,20 @@
 # Shell for new panes. Default: $SHELL on Linux, powershell.exe on Windows.
 #default_shell = "/bin/zsh"
 
+# Set true by the first-run setup wizard. While false, the wizard runs at
+# startup (claude command, explorer folders, shell, display). Set false to
+# re-run it, or trigger it any time from the settings overlay (Alt+o).
+setup_complete = false
+
+# Folders the explorer is allowed to browse. This is also its upper boundary —
+# the explorer can never navigate above these. A leading ~ is expanded.
+# One root shows its contents; several roots appear as top-level entries.
+#explorer_roots = ["~/projects", "/mnt/prox-share"]
+
+# Check GitHub for a newer release on startup (via curl; silent if offline).
+# When one exists, Alt+u opens an upgrade / changelog overlay.
+check_updates = true
+
 # Open the file explorer panel at startup.
 show_explorer_on_start = false
 

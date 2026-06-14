@@ -91,6 +91,7 @@ below goes verbatim to the focused terminal.
 | `Alt+y` | copy mode (see below) |
 | `Alt+PgUp` / `Alt+PgDn` | scrollback (any input snaps back to live) |
 | `Alt+Shift+L` | passthrough mode: forward *everything*, incl. Alt keys |
+| `Alt+u` | update overlay (shown when a newer release is available) |
 | `Alt+?` | help overlay |
 
 ### Copying text
@@ -131,7 +132,7 @@ panel included. mipoco therefore handles the mouse itself:
 | `x` | execute the selected file |
 | `.` | toggle hidden files |
 | `R` | refresh |
-| `Backspace` or `-` | go up: parent becomes the tree root |
+| `Backspace` or `-` | collapse all & jump to the top (cannot go above the allowed folders) |
 | `Esc` | back to the terminal pane |
 
 ### Executing files
@@ -154,10 +155,40 @@ panel included. mipoco therefore handles the mouse itself:
 
 ## Configuration
 
+On first launch mipoco runs a short **setup wizard**:
+
+1. **Claude** — the command is auto-detected on your shell PATH; confirm or edit it.
+2. **Explorer access** — a browse-and-select picker (`j/k` move, `l`/`h` in/out
+   of folders, `Space` to select, `.` toggle hidden) to choose **which folders
+   the explorer may browse**.
+3. **Shell** — pick from the shells detected on your machine (or "auto = $SHELL").
+4. **Display** — text viewer (builtin/external) and explorer-on-start.
+
+It runs once (`setup_complete` in the config); `Enter` advances, `Alt+←` goes
+back, `Esc` skips with defaults. Re-run it any time from the settings overlay.
+
 Press `Alt+o` for the in-app settings overlay — explorer-on-start, explorer
 width, scrollback, shell, claude command, text viewer (builtin/external),
-external pager, auto-close. Changes apply immediately and are written to the
-config file.
+external pager, auto-close, check-for-updates, re-run setup. Changes apply
+immediately and are written to the config file.
+
+### Explorer access
+
+`explorer_roots` is the allowlist of folders the explorer may browse — it is
+also a hard upper boundary, so the explorer can never navigate above them
+(there is no "go to `/`"). One root shows its contents directly; several roots
+appear as top-level entries. This is a browsing guardrail, not a sandbox: the
+shell/claude panes are full terminals and can still `cd` anywhere.
+
+### Updates
+
+When `check_updates` is on, mipoco checks GitHub for a newer release on startup
+(via `curl`, non-blocking, silent if offline). If one exists, the status bar
+shows `vX.Y.Z available · Alt+u`. `Alt+u` opens an overlay to **[u]** upgrade
+(downloads the matching release asset and replaces the running binary) or
+**[c]** view the changelog. A root-installed copy (`.deb` in `/usr/bin`) can't
+self-replace, so it falls back to opening the releases page for a manual
+download.
 
 The file lives at `~/.config/mipoco/config.toml` (Linux) or
 `%APPDATA%\mipoco\config.toml` (Windows) and can also be edited by hand
@@ -167,6 +198,9 @@ See [config.example.toml](config.example.toml):
 
 ```toml
 # default_shell = "/bin/zsh"     # default: $SHELL (Linux), powershell (Windows)
+setup_complete = true            # set by the first-run wizard; false re-runs it
+explorer_roots = ["~/projects"]  # folders the explorer may browse (and its boundary)
+check_updates = true             # check GitHub for a newer release on startup
 show_explorer_on_start = false   # open the file explorer panel at startup
 claude_command = "claude"        # what the c/C and Alt+c actions run
 viewer = "builtin"               # text viewer: "builtin" (in-app) or "external"

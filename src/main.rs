@@ -6,7 +6,9 @@ mod exec;
 mod explorer;
 mod layout;
 mod pty;
+mod setup;
 mod ui;
+mod update;
 mod viewer;
 
 use std::io::stdout;
@@ -66,8 +68,30 @@ fn run(
     event::spawn_input_thread(tx.clone());
 
     let size = terminal.size()?;
-    let mut app = App::new(config, tx, (size.width, size.height))?;
+    let first_run = !config.setup_complete;
+    let check_updates = config.check_updates;
+    let mut app = App::new(config, tx.clone(), (size.width, size.height))?;
     app.status_msg = warn;
+    if first_run {
+        app.open_setup_wizard();
+    }
+    if check_updates {
+        std::thread::spawn(move || {
+            if let Some(info) = update::check() {
+                let _ = tx.send(event::AppEvent::UpdateChecked(Box::new(info)));
+            }
+        });
+    }
+    // Preview helper: `MIPOCO_FAKE_UPDATE=0.9.9 mipoco` seeds a fake update so
+    // the banner/overlay can be exercised before any release is published.
+    if let Ok(v) = std::env::var("MIPOCO_FAKE_UPDATE") {
+        app.update = Some(update::UpdateInfo {
+            version: v,
+            notes: "## What's new\n\n- in-app update check + changelog\n- first-run setup wizard\n- explorer folder access control".into(),
+            release_url: "https://github.com/NFD-Joel/mipoco/releases".into(),
+            asset_url: None,
+        });
+    }
 
     loop {
         let size = terminal.size()?;

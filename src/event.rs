@@ -6,6 +6,7 @@ use crossterm::event::{
 use vt100::{MouseProtocolEncoding, MouseProtocolMode};
 
 use crate::pty::SessionId;
+use crate::update::UpdateInfo;
 
 pub enum AppEvent {
     Input(Event),
@@ -14,6 +15,10 @@ pub enum AppEvent {
     PtyOutput,
     /// A session's reader hit EOF: the child exited.
     PtyExited(SessionId),
+    /// Startup update check finished; `Some` when a newer release exists.
+    UpdateChecked(Box<UpdateInfo>),
+    /// A self-update attempt finished (Ok message / Err message).
+    UpdateResult(Result<String, String>),
 }
 
 pub fn spawn_input_thread(tx: Sender<AppEvent>) {

@@ -13,10 +13,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
         return;
     }
     let focused = app.focus == Focus::Explorer;
-    let title = format!(
-        " {} ",
-        shorten_path(&app.explorer.root, area.width.saturating_sub(4) as usize)
-    );
+    let max_title = area.width.saturating_sub(4) as usize;
+    let title = match app.explorer.roots.as_slice() {
+        [one] => format!(" {} ", shorten_path(one, max_title)),
+        many => format!(" {} folders ", many.len()),
+    };
     let block = Block::bordered().title(title).border_style(if focused {
         Style::new().fg(Color::Cyan)
     } else {

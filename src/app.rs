@@ -17,6 +17,8 @@ use crate::exec::{self, ExecOutcome};
 use crate::explorer::Explorer;
 use crate::layout::{NavDir, PaneNode, SplitDir, Tab, directional_focus};
 use crate::pty::{PtySession, SessionId};
+use crate::setup::{Step, Wizard};
+use crate::update::{self, UpdateInfo};
 use crate::viewer::{Viewer, WrapMode};
 
 /// Direction every split uses (side by side; vertical divider).
@@ -35,6 +37,8 @@ pub enum SettingKind {
     Choice,
     Number,
     Text,
+    /// An action triggered by Enter rather than a stored value (e.g. re-run setup).
+    Action,
 }
 
 pub struct SettingDef {
@@ -75,7 +79,30 @@ pub const SETTINGS: &[SettingDef] = &[
         label: "external pager",
         kind: SettingKind::Text,
     },
+    SettingDef {
+        label: "check for updates",
+        kind: SettingKind::Bool,
+    },
+    SettingDef {
+        label: "re-run setup wizard",
+        kind: SettingKind::Action,
+    },
 ];
+
+/// Which view the update overlay is showing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum UpdateMode {
+    /// Upgrade / changelog / dismiss prompt.
+    Prompt,
+    /// Scrollable release notes.
+    Changelog,
+}
+
+/// State of the update overlay (opened with Alt+u when an update is available).
+pub struct UpdateOverlay {
+    pub mode: UpdateMode,
+    pub scroll: u16,
+}
 
 /// Keyboard copy mode: line-wise selection on the focused pane's screen.
 pub struct CopyMode {
@@ -135,6 +162,14 @@ pub struct App {
     pub copy_mode: Option<CopyMode>,
     pub mouse_sel: Option<MouseSel>,
     pub renaming: Option<String>,
+    /// First-run setup wizard, when active (modal — captures all input).
+    pub wizard: Option<Wizard>,
+    /// A newer release found by the startup check, if any.
+    pub update: Option<UpdateInfo>,
+    /// The update overlay (Alt+u), when open.
+    pub update_overlay: Option<UpdateOverlay>,
+    /// A self-update is downloading/applying right now.
+    pub updating: bool,
     pub status_msg: Option<String>,
     pub should_quit: bool,
     next_id: SessionId,
@@ -144,8 +179,8 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config, tx: Sender<AppEvent>, term_size: (u16, u16)) -> Result<Self> {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let explorer_visible = config.show_explorer_on_start;
+        let explorer = Explorer::new(config.explorer_roots.clone());
         let mut app = Self {
             config,
             sessions: HashMap::new(),
@@ -153,7 +188,7 @@ impl App {
             tabs: Vec::new(),
             active_tab: 0,
             focus: Focus::Pane,
-            explorer: Explorer::new(cwd),
+            explorer,
             explorer_visible,
             explorer_rect: Rect::default(),
             pane_rects: Vec::new(),
@@ -166,6 +201,10 @@ impl App {
             copy_mode: None,
             mouse_sel: None,
             renaming: None,
+            wizard: None,
+            update: None,
+            update_overlay: None,
+            updating: false,
             status_msg: None,
             should_quit: false,
             next_id: 0,
@@ -270,11 +309,33 @@ impl App {
                     self.remove_session(id);
                 }
             }
+            AppEvent::UpdateChecked(info) => self.update = Some(*info),
+            AppEvent::UpdateResult(res) => {
+                self.updating = false;
+                match res {
+                    Ok(msg) => self.status_msg = Some(msg),
+                    Err(e) => {
+                        self.status_msg = Some(format!("update failed: {e}"));
+                        // fall back to the manual download page
+                        if let Some(u) = &self.update {
+                            let _ = opener::open(&u.release_url);
+                        }
+                    }
+                }
+            }
         }
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
         self.status_msg = None;
+        if self.wizard.is_some() {
+            self.handle_wizard_key(&key);
+            return;
+        }
+        if self.update_overlay.is_some() {
+            self.handle_update_key(&key);
+            return;
+        }
         if self.show_help {
             self.show_help = false;
             return;
@@ -346,6 +407,7 @@ impl App {
                     self.split_with(SPLIT_DIR, cmd, title, false);
                 }
                 KeyCode::Char('y') => self.enter_copy_mode(),
+                KeyCode::Char('u') => self.open_update_overlay(),
                 KeyCode::Char('?') => self.show_help = true,
                 KeyCode::Char('L') => {
                     self.passthrough = true;
@@ -416,6 +478,7 @@ impl App {
             5 => self.config.claude_command.clone(),
             6 => self.config.viewer.label().to_string(),
             7 => self.config.pager.clone(),
+            8 => self.config.check_updates.to_string(),
             _ => String::new(),
         }
     }
@@ -465,6 +528,7 @@ impl App {
                     self.cycle_choice_setting();
                     self.save_config();
                 }
+                SettingKind::Action => self.run_setting_action(),
                 _ => self.settings_edit = Some(self.setting_value(self.settings_sel)),
             },
             _ => {}
@@ -482,6 +546,7 @@ impl App {
                 }
             }
             1 => self.config.auto_close_exited = !self.config.auto_close_exited,
+            8 => self.config.check_updates = !self.config.check_updates,
             _ => {}
         }
     }
@@ -489,6 +554,15 @@ impl App {
     fn cycle_choice_setting(&mut self) {
         if self.settings_sel == 6 {
             self.config.viewer = self.config.viewer.toggled();
+        }
+    }
+
+    /// Run the action for an `Action`-kind settings row (index 9: re-run setup).
+    fn run_setting_action(&mut self) {
+        if self.settings_sel == 9 {
+            self.settings_open = false;
+            self.settings_edit = None;
+            self.open_setup_wizard();
         }
     }
 
@@ -540,6 +614,175 @@ impl App {
             Ok(path) => self.status_msg = Some(format!("saved to {}", path.display())),
             Err(e) => self.status_msg = Some(format!("save failed: {e}")),
         }
+    }
+
+    // ---- setup wizard ------------------------------------------------------
+
+    /// Open the first-run setup wizard (also reachable later from settings).
+    pub fn open_setup_wizard(&mut self) {
+        self.wizard = Some(Wizard::new(&self.config));
+    }
+
+    fn handle_wizard_key(&mut self, key: &KeyEvent) {
+        let Some(mut w) = self.wizard.take() else {
+            return;
+        };
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let typed = |code: KeyCode| match code {
+            KeyCode::Char(c) if !alt && !ctrl => Some(c),
+            _ => None,
+        };
+        let mut finish = false;
+
+        if key.code == KeyCode::Esc {
+            finish = true;
+        } else if alt && key.code == KeyCode::Left {
+            w.prev();
+        } else {
+            match w.step {
+                Step::Welcome => {
+                    if key.code == KeyCode::Enter {
+                        w.next();
+                    }
+                }
+                Step::Claude => match key.code {
+                    KeyCode::Enter => w.next(),
+                    KeyCode::Backspace => {
+                        w.claude.pop();
+                    }
+                    code => {
+                        if let Some(c) = typed(code) {
+                            w.claude.push(c);
+                        }
+                    }
+                },
+                Step::Folders => match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => w.picker.move_sel(-1),
+                    KeyCode::Down | KeyCode::Char('j') => w.picker.move_sel(1),
+                    KeyCode::Right | KeyCode::Char('l') => w.picker.enter(),
+                    KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => w.picker.up(),
+                    KeyCode::Char(' ') => w.toggle_highlighted_root(),
+                    KeyCode::Char('.') => w.picker.toggle_hidden(),
+                    KeyCode::Enter => w.next(),
+                    _ => {}
+                },
+                Step::Shell => match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        w.shell_sel = w.shell_sel.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        w.shell_sel = (w.shell_sel + 1).min(w.shells.len().saturating_sub(1));
+                    }
+                    KeyCode::Enter => w.next(),
+                    _ => {}
+                },
+                Step::Display => match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        w.display_sel = w.display_sel.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        w.display_sel = (w.display_sel + 1).min(1);
+                    }
+                    KeyCode::Char(' ') => {
+                        if w.display_sel == 0 {
+                            w.viewer = w.viewer.toggled();
+                        } else {
+                            w.explorer_on_start = !w.explorer_on_start;
+                        }
+                    }
+                    KeyCode::Enter => w.next(),
+                    _ => {}
+                },
+                Step::Finish => {
+                    if key.code == KeyCode::Enter {
+                        finish = true;
+                    }
+                }
+            }
+        }
+
+        if finish {
+            self.finish_wizard(&w);
+        } else {
+            self.wizard = Some(w);
+        }
+    }
+
+    fn finish_wizard(&mut self, w: &Wizard) {
+        w.apply(&mut self.config);
+        if let Err(e) = self.config.save() {
+            self.status_msg = Some(format!("config save failed: {e}"));
+        } else {
+            self.status_msg = Some("setup complete".into());
+        }
+        self.explorer = Explorer::new(self.config.explorer_roots.clone());
+        self.explorer_visible = self.config.show_explorer_on_start;
+        self.wizard = None;
+    }
+
+    // ---- updates -----------------------------------------------------------
+
+    fn open_update_overlay(&mut self) {
+        if self.update.is_some() {
+            self.update_overlay = Some(UpdateOverlay {
+                mode: UpdateMode::Prompt,
+                scroll: 0,
+            });
+        } else {
+            self.status_msg = Some("mipoco is up to date".into());
+        }
+    }
+
+    fn handle_update_key(&mut self, key: &KeyEvent) {
+        let Some(mode) = self.update_overlay.as_ref().map(|o| o.mode) else {
+            return;
+        };
+        match mode {
+            UpdateMode::Prompt => match key.code {
+                KeyCode::Char('u') => {
+                    self.update_overlay = None;
+                    self.start_update();
+                }
+                KeyCode::Char('c') => {
+                    if let Some(o) = self.update_overlay.as_mut() {
+                        o.mode = UpdateMode::Changelog;
+                        o.scroll = 0;
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('q') => self.update_overlay = None,
+                _ => {}
+            },
+            UpdateMode::Changelog => {
+                let Some(o) = self.update_overlay.as_mut() else {
+                    return;
+                };
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => o.scroll = o.scroll.saturating_add(1),
+                    KeyCode::Char('k') | KeyCode::Up => o.scroll = o.scroll.saturating_sub(1),
+                    KeyCode::PageDown | KeyCode::Char(' ') => o.scroll = o.scroll.saturating_add(10),
+                    KeyCode::PageUp | KeyCode::Char('b') => o.scroll = o.scroll.saturating_sub(10),
+                    KeyCode::Esc | KeyCode::Char('q') => o.mode = UpdateMode::Prompt,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn start_update(&mut self) {
+        let Some(info) = self.update.clone() else {
+            return;
+        };
+        if self.updating {
+            return;
+        }
+        self.updating = true;
+        self.status_msg = Some("downloading update…".into());
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let res = update::apply(&info).map_err(|e| e.to_string());
+            let _ = tx.send(AppEvent::UpdateResult(res));
+        });
     }
 
     fn handle_rename_key(&mut self, key: &KeyEvent) {
@@ -638,7 +881,7 @@ impl App {
             }
             KeyCode::Char('.') => self.explorer.toggle_hidden(),
             KeyCode::Char('R') => self.explorer.rebuild(),
-            KeyCode::Backspace | KeyCode::Char('-') => self.explorer.go_parent_root(),
+            KeyCode::Backspace | KeyCode::Char('-') => self.explorer.collapse_all(),
             KeyCode::Esc => self.focus = Focus::Pane,
             _ => {}
         }
