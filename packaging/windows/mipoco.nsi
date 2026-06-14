@@ -1,5 +1,5 @@
 ; mipoco Windows installer (NSIS).
-; Build from this directory:  makensis /DVERSION=0.4.0 mipoco.nsi
+; Build from this directory:  makensis /DVERSION=0.7.1 mipoco.nsi
 ; Produces mipoco-<version>-setup.exe with Start Menu + Desktop shortcuts,
 ; an icon, and a clean uninstaller registered in Add/Remove Programs.
 ; Paths are relative to this script's folder (packaging\windows).

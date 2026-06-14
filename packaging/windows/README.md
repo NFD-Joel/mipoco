@@ -34,11 +34,28 @@ baked in.
 
 ```powershell
 cd packaging\windows
-makensis /DVERSION=0.4.0 mipoco.nsi
+makensis /DVERSION=0.7.1 mipoco.nsi
 ```
 
-Use the same version as `Cargo.toml`. The output `mipoco-0.4.0-setup.exe` lands
+Use the same version as `Cargo.toml`. The output `mipoco-0.7.1-setup.exe` lands
 in `packaging\windows\`. Double-click it to install.
+
+## 4. (Optional) Asset for the in-app updater
+
+mipoco's `Alt+u` self-update downloads a `.zip` from the GitHub Release and
+swaps its own binary. To support Windows users, upload an archive whose name
+contains `x86_64` + `windows`, with `mipoco.exe` inside:
+
+```powershell
+# from the repo root, after `cargo build --release`
+Compress-Archive -Path target\release\mipoco.exe `
+  -DestinationPath mipoco-x86_64-pc-windows-msvc.zip
+```
+
+Attach that `.zip` to the same GitHub Release as the Linux
+`mipoco-x86_64-unknown-linux-gnu.tar.gz`. Note: a Program Files install can't
+self-replace without admin rights, so it falls back to opening the releases
+page — install to a user-writable folder if you want one-click updates.
 
 ## Notes
 

@@ -78,8 +78,12 @@ pub fn apply(info: &UpdateInfo) -> Result<String> {
     let download = dir.join("asset");
     curl_download(url, &download).context("download failed")?;
 
-    let binary = if url.ends_with(".tar.gz") || url.ends_with(".tgz") {
-        extract_tar_gz(&download, &dir)?
+    let lower = url.to_lowercase();
+    let binary = if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
+        extract(&download, &dir, true)?
+    } else if lower.ends_with(".zip") {
+        // Windows assets ship as .zip; bsdtar (tar.exe on Windows 10+) reads them.
+        extract(&download, &dir, false)?
     } else {
         download.clone()
     };
@@ -158,9 +162,13 @@ fn curl_download(url: &str, dest: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-fn extract_tar_gz(archive: &std::path::Path, dir: &std::path::Path) -> Result<PathBuf> {
+/// Extract an archive with `tar` into `dir` and return the `mipoco` binary
+/// inside it. `gzip` selects `-xzf` (`.tar.gz`) vs `-xf` (`.zip`, read by the
+/// bsdtar that ships as `tar.exe` on Windows 10+).
+fn extract(archive: &std::path::Path, dir: &std::path::Path, gzip: bool) -> Result<PathBuf> {
+    let flag = if gzip { "-xzf" } else { "-xf" };
     let status = std::process::Command::new("tar")
-        .arg("-xzf")
+        .arg(flag)
         .arg(archive)
         .arg("-C")
         .arg(dir)
