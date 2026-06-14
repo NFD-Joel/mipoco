@@ -12,6 +12,9 @@ pub struct Config {
     pub show_explorer_on_start: bool,
     /// Command used by the explorer's "claude session here" action.
     pub claude_command: String,
+    /// Pager used to view text/markdown files inside a mipoco pane.
+    /// Set to e.g. "glow -p" or "bat" for rendered markdown if installed.
+    pub pager: String,
     /// Scrollback lines kept per pane (bounded; primary screen only).
     pub scrollback: usize,
     pub explorer_width: u16,
@@ -21,6 +24,8 @@ pub struct Config {
     pub runners: HashMap<String, String>,
     /// Extensions always handed to the OS default opener.
     pub open_with_system: Vec<String>,
+    /// Extensions opened in the pager (scrollable viewer) inside a pane.
+    pub view_with_pager: Vec<String>,
 }
 
 impl Default for Config {
@@ -29,6 +34,7 @@ impl Default for Config {
             default_shell: None,
             show_explorer_on_start: false,
             claude_command: "claude".into(),
+            pager: "less -R".into(),
             scrollback: 5000,
             explorer_width: 32,
             auto_close_exited: false,
@@ -36,6 +42,14 @@ impl Default for Config {
             open_with_system: [
                 "html", "htm", "pdf", "png", "jpg", "jpeg", "gif", "svg", "webp", "mp4", "mp3",
                 "webm", "odt", "docx", "xlsx",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+            view_with_pager: [
+                "md", "markdown", "txt", "text", "log", "rst", "csv", "tsv", "json", "toml",
+                "yaml", "yml", "ini", "conf", "cfg", "env", "lock", "diff", "patch", "rs", "go",
+                "c", "h", "cpp", "hpp", "java", "css", "scss", "xml", "sql",
             ]
             .iter()
             .map(|s| s.to_string())

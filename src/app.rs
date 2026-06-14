@@ -64,6 +64,10 @@ pub const SETTINGS: &[SettingDef] = &[
         label: "claude command",
         kind: SettingKind::Text,
     },
+    SettingDef {
+        label: "pager",
+        kind: SettingKind::Text,
+    },
 ];
 
 /// Keyboard copy mode: line-wise selection on the focused pane's screen.
@@ -333,7 +337,12 @@ impl App {
                 }
                 KeyCode::Char('c') => {
                     let cwd = self.focused_cwd();
-                    let (cmd, title) = self.claude_cmd(cwd.as_deref());
+                    let (cmd, title) = self.claude_cmd(cwd.as_deref(), false);
+                    self.split_with(SPLIT_DIR, cmd, title, false);
+                }
+                KeyCode::Char('b') => {
+                    let cwd = self.focused_cwd();
+                    let (cmd, title) = self.claude_cmd(cwd.as_deref(), true);
                     self.split_with(SPLIT_DIR, cmd, title, false);
                 }
                 KeyCode::Char('y') => self.enter_copy_mode(),
@@ -385,6 +394,7 @@ impl App {
             3 => self.config.scrollback.to_string(),
             4 => self.config.default_shell.clone().unwrap_or_default(),
             5 => self.config.claude_command.clone(),
+            6 => self.config.pager.clone(),
             _ => String::new(),
         }
     }
@@ -482,6 +492,13 @@ impl App {
                 }
                 self.config.claude_command = val.to_string();
             }
+            6 => {
+                if val.is_empty() {
+                    self.status_msg = Some("pager cannot be empty".into());
+                    return;
+                }
+                self.config.pager = val.to_string();
+            }
             _ => {}
         }
         self.save_config();
@@ -557,8 +574,21 @@ impl App {
             }
             KeyCode::Char('c') => {
                 let d = self.explorer.target_dir();
-                let (cmd, title) = self.claude_cmd(Some(&d));
+                let (cmd, title) = self.claude_cmd(Some(&d), false);
                 self.new_tab_with(cmd, title);
+            }
+            KeyCode::Char('b') => {
+                let d = self.explorer.target_dir();
+                let (cmd, title) = self.claude_cmd(Some(&d), true);
+                self.new_tab_with(cmd, title);
+            }
+            KeyCode::Char('v') => {
+                if let Some(e) = self.explorer.selected_entry()
+                    && !e.is_dir
+                {
+                    let p = e.path.clone();
+                    self.view_file(&p);
+                }
             }
             KeyCode::Char('S') => {
                 let d = self.explorer.target_dir();
@@ -567,7 +597,12 @@ impl App {
             }
             KeyCode::Char('C') => {
                 let d = self.explorer.target_dir();
-                let (cmd, title) = self.claude_cmd(Some(&d));
+                let (cmd, title) = self.claude_cmd(Some(&d), false);
+                self.split_with(SPLIT_DIR, cmd, title, false);
+            }
+            KeyCode::Char('B') => {
+                let d = self.explorer.target_dir();
+                let (cmd, title) = self.claude_cmd(Some(&d), true);
                 self.split_with(SPLIT_DIR, cmd, title, false);
             }
             KeyCode::Char('.') => self.explorer.toggle_hidden(),
@@ -961,17 +996,38 @@ impl App {
         (cmd, title)
     }
 
-    fn claude_cmd(&self, cwd: Option<&Path>) -> (CommandBuilder, String) {
-        let mut parts = self.config.claude_command.split_whitespace();
-        let prog = parts.next().unwrap_or("claude");
-        let title = Path::new(prog)
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| prog.to_string());
-        let mut cmd = CommandBuilder::new(prog);
-        for a in parts {
-            cmd.arg(a);
+    /// Build the command for a claude pane. When `bypass` is set, claude runs
+    /// with `--dangerously-skip-permissions` (YOLO mode).
+    ///
+    /// On Unix the command runs through an interactive login shell
+    /// (`$SHELL -ic 'exec …'`) so claude is found on the PATH the user sets in
+    /// their shell rc (e.g. `~/.npm-global/bin` in `~/.zshrc`). This matters when
+    /// mipoco is launched from a desktop icon, where that PATH addition is absent
+    /// and a bare `claude` would fail to spawn.
+    fn claude_cmd(&self, cwd: Option<&Path>, bypass: bool) -> (CommandBuilder, String) {
+        let mut line = self.config.claude_command.clone();
+        if bypass {
+            line.push_str(" --dangerously-skip-permissions");
         }
+        let title = if bypass { "claude!".into() } else { "claude".into() };
+
+        #[cfg(not(windows))]
+        let mut cmd = {
+            let mut c = CommandBuilder::new(self.config.shell());
+            c.args(["-ic", &format!("exec {line}")]);
+            c
+        };
+        #[cfg(windows)]
+        let mut cmd = {
+            // Windows GUI apps inherit the system PATH, so run claude directly.
+            let mut parts = line.split_whitespace();
+            let prog = parts.next().unwrap_or("claude").to_string();
+            let mut c = CommandBuilder::new(&prog);
+            for a in parts {
+                c.arg(a);
+            }
+            c
+        };
         if let Some(d) = cwd {
             cmd.cwd(d);
         }
@@ -1156,6 +1212,16 @@ impl App {
             }
             Err(e) => self.status_msg = Some(format!("exec failed: {e}")),
         }
+    }
+
+    /// Open a file in the configured pager inside a split pane. Scroll with the
+    /// pager's own keys (arrows / PgUp / PgDn / mouse wheel); zoom is the
+    /// terminal's own font zoom (Ctrl +/-). The pane closes when the pager quits.
+    fn view_file(&mut self, path: &Path) {
+        let ExecOutcome::Run { cmd, title } = exec::view(path, &self.config) else {
+            return;
+        };
+        self.split_with(SplitDir::Vertical, cmd, title, true);
     }
 
     fn focused_session_id(&self) -> Option<SessionId> {

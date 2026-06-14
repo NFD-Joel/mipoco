@@ -34,8 +34,48 @@ pub fn execute(path: &Path, config: &Config) -> Result<ExecOutcome> {
         return Ok(ExecOutcome::Run { cmd, title });
     }
 
+    if config.view_with_pager.contains(&ext) {
+        return Ok(view(path, config));
+    }
+
     opener::open(path)?;
     Ok(ExecOutcome::Opened)
+}
+
+/// View a file in the configured pager inside a pane, regardless of extension.
+/// Used by the explorer's "view" action and for `view_with_pager` extensions.
+pub fn view(path: &Path, config: &Config) -> ExecOutcome {
+    let title = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "view".into());
+    let cwd = path.parent().unwrap_or(Path::new("."));
+    ExecOutcome::Run {
+        cmd: pager_cmd(&config.shell(), &config.pager, path, cwd),
+        title,
+    }
+}
+
+/// Build the pager command. On Unix it runs through an interactive login shell
+/// (`$SHELL -ic`) so a pager installed under a profile-only PATH dir
+/// (e.g. ~/.npm-global/bin, ~/go/bin) is found even when mipoco is started from
+/// a desktop icon. The file path rides in as `$0`, so it never needs quoting.
+#[cfg(not(windows))]
+fn pager_cmd(shell: &str, pager: &str, path: &Path, cwd: &Path) -> CommandBuilder {
+    let mut cmd = CommandBuilder::new(shell);
+    cmd.args(["-ic", &format!("exec {pager} \"$0\"")]);
+    cmd.arg(path);
+    cmd.cwd(cwd);
+    cmd
+}
+
+#[cfg(windows)]
+fn pager_cmd(_shell: &str, pager: &str, path: &Path, cwd: &Path) -> CommandBuilder {
+    let mut cmd = CommandBuilder::new("cmd.exe");
+    let line = format!("{} \"{}\"", pager, path.display());
+    cmd.args(["/C", &line]);
+    cmd.cwd(cwd);
+    cmd
 }
 
 /// Wrap the runner so the pane shows the exit code and waits for Enter

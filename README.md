@@ -82,6 +82,7 @@ below goes verbatim to the focused terminal.
 | `Alt+,` / `Alt+.` (also `Alt+[` / `Alt+]`) | previous / next tab |
 | `Alt+r` | rename tab |
 | `Alt+s` / `Alt+c` | split with a shell / claude session |
+| `Alt+b` | split with a claude session in **bypass mode** (`--dangerously-skip-permissions`) |
 | `Alt+o` | settings overlay (changes are saved to the config file) |
 | `Alt+arrows` or `Alt+h j k l` | move focus between panes |
 | `Alt+Shift+arrows` | resize split |
@@ -126,6 +127,8 @@ panel included. mipoco therefore handles the mouse itself:
 | `l` / `h` | expand · collapse / jump to parent |
 | `c` / `s` | new **claude** / shell tab in the selected folder |
 | `C` / `S` | same, but as a split next to the current pane |
+| `b` / `B` | claude in **bypass mode** (`--dangerously-skip-permissions`), as a tab / split |
+| `v` | **view** the selected file in the pager (scrollable, inside a pane) |
 | `x` | execute the selected file |
 | `.` | toggle hidden files |
 | `R` | refresh |
@@ -138,12 +141,16 @@ panel included. mipoco therefore handles the mouse itself:
   default app (`xdg-open` / ShellExecute) — HTML lands in your browser.
 - Extensions with a configured runner (`py`, `js`, `sh`, …) run **inside a new
   pane**; the pane shows `[exit: N] press Enter to close` when done.
+- Extensions in `view_with_pager` (md, txt, log, json, code, …) open in the
+  pager **inside a pane** — scroll with the pager's keys / mouse wheel, zoom
+  with your terminal's font zoom, quit (`q` in `less`) to close the pane.
+  Press `v` in the explorer to view any file this way regardless of extension.
 - Anything else falls back to the OS default opener.
 
 ## Configuration
 
 Press `Alt+o` for the in-app settings overlay — explorer-on-start, explorer
-width, scrollback, shell, claude command, auto-close. Changes apply
+width, scrollback, shell, claude command, pager, auto-close. Changes apply
 immediately and are written to the config file.
 
 The file lives at `~/.config/mipoco/config.toml` (Linux) or
@@ -155,7 +162,8 @@ See [config.example.toml](config.example.toml):
 ```toml
 # default_shell = "/bin/zsh"     # default: $SHELL (Linux), powershell (Windows)
 show_explorer_on_start = false   # open the file explorer panel at startup
-claude_command = "claude"        # what the explorer's c/C action runs
+claude_command = "claude"        # what the c/C and Alt+c actions run
+pager = "less -R"                # viewer for text/md files; try "glow -p" or "bat"
 scrollback = 5000                # lines kept per pane (primary screen only)
 explorer_width = 32
 auto_close_exited = false        # close panes immediately when their child exits
@@ -163,7 +171,14 @@ auto_close_exited = false        # close panes immediately when their child exit
 [runners]                        # extend/override the built-in runner table
 py = "python3"
 go = "go run"
+
+# view_with_pager = ["md", "txt", "log", "json"]   # extensions opened in the pager
 ```
+
+On Linux, claude and the pager run through an interactive login shell
+(`$SHELL -ic`) so they're found on the PATH your shell rc sets up (e.g.
+`~/.npm-global/bin` from `~/.zshrc`) — this is why claude spawns correctly even
+when mipoco is launched from a desktop icon rather than a terminal.
 
 Note: saving from the settings overlay rewrites the file, so hand-written
 comments in it are not preserved.

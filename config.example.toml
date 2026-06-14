@@ -9,8 +9,15 @@
 # Open the file explorer panel at startup.
 show_explorer_on_start = false
 
-# Command run by the explorer's c/C ("claude session here") action.
+# Command run by the c/C and Alt+c ("claude session here") actions.
+# Bypass mode (b/B, Alt+b) appends --dangerously-skip-permissions to this.
+# On Linux this runs through `$SHELL -ic` so claude is found on your shell's
+# PATH (e.g. ~/.npm-global/bin) even when mipoco starts from a desktop icon.
 claude_command = "claude"
+
+# Pager used to view text/markdown files inside a pane (v in the explorer, or
+# any view_with_pager extension). Try "glow -p" or "bat" for rendered markdown.
+pager = "less -R"
 
 # Scrollback lines kept per pane (bounded; primary screen only).
 scrollback = 5000
@@ -24,6 +31,10 @@ auto_close_exited = false
 # Extensions always handed to the OS default opener (browser, viewer, ...).
 # NOTE: must stay above the [runners] table — it is a top-level key.
 #open_with_system = ["html", "htm", "pdf", "png", "jpg", "jpeg", "gif", "svg", "webp", "mp4", "mp3", "webm", "odt", "docx", "xlsx"]
+
+# Extensions opened in the pager (scrollable viewer) inside a pane.
+# NOTE: must stay above the [runners] table — it is a top-level key.
+#view_with_pager = ["md", "markdown", "txt", "log", "json", "toml", "yaml", "rs", "py"]
 
 # Runners for "execute file in a pane", keyed by extension.
 # Entries here extend/override the built-in table
