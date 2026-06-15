@@ -27,6 +27,8 @@ pub fn render_all(f: &mut Frame, app: &App) {
         let inner = if app.bordered {
             let border_style = if focused {
                 Style::new().fg(Color::Cyan)
+            } else if app.attention.contains(id) {
+                Style::new().fg(Color::Yellow)
             } else if *id == tab.focus {
                 Style::new().fg(Color::Blue)
             } else {

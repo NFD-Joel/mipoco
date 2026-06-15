@@ -21,6 +21,21 @@ anyhow = "1"
 unicode-width = "0.2"
 serde_json = "1"
 self-replace = "1"
+notify-rust = "4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.13"
+
+[target.'cfg(windows)'.dependencies]
+# Toast with a click-activation callback (so clicking jumps to the pane) and a
+# per-app AppUserModelID (so "mipoco" shows in Windows notification settings).
+tauri-winrt-notification = "0.7"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

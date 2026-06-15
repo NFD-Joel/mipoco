@@ -43,6 +43,9 @@ pub struct Config {
     pub explorer_roots: Vec<PathBuf>,
     /// Check GitHub for a newer release on startup and offer to upgrade.
     pub check_updates: bool,
+    /// Pop a desktop notification when a Claude pane asks for permission or
+    /// finishes. Installs hooks into `~/.claude/settings.json` when enabled.
+    pub notifications: bool,
     /// Show the file explorer panel when the app starts.
     pub show_explorer_on_start: bool,
     /// Command used by the explorer's "claude session here" action.
@@ -72,6 +75,7 @@ impl Default for Config {
             setup_complete: false,
             explorer_roots: default_explorer_roots(),
             check_updates: true,
+            notifications: true,
             show_explorer_on_start: false,
             claude_command: "claude".into(),
             viewer: ViewerMode::Builtin,

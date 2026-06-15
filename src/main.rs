@@ -5,6 +5,7 @@ mod event;
 mod exec;
 mod explorer;
 mod layout;
+mod notify;
 mod pty;
 mod setup;
 mod ui;
@@ -30,6 +31,9 @@ fn main() -> Result<()> {
                 println!("mipoco {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
+            // Claude hook callback: forward an attention event to the running
+            // mipoco that spawned this pane, then exit. No TUI.
+            "--hook" => return notify::hook_client(args.next()),
             _ => {
                 println!("mipoco {} — minimal terminal multiplexer", env!("CARGO_PKG_VERSION"));
                 println!("usage: mipoco            start (no arguments)");
@@ -72,6 +76,13 @@ fn run(
     let check_updates = config.check_updates;
     let mut app = App::new(config, tx.clone(), (size.width, size.height))?;
     app.status_msg = warn;
+    // Keep Claude's hooks in sync with the notifications setting.
+    if app.config.notifications
+        && app.status_msg.is_none()
+        && let Err(e) = notify::install_hooks()
+    {
+        app.status_msg = Some(format!("notify hooks: {e}"));
+    }
     if first_run {
         app.open_setup_wizard();
     }

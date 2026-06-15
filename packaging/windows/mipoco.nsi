@@ -18,6 +18,9 @@ Unicode true
 !define PUBLISHER "nfd"
 !define EXE "mipoco.exe"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP}"
+; AppUserModelID — must match notify::WIN_AUMID in the binary so toast
+; notifications attribute to "mipoco" and appear in Windows notification settings.
+!define AUMID "nfd.mipoco"
 
 Name "${APP}"
 OutFile "${APP}-${VERSION}-setup.exe"
@@ -49,6 +52,11 @@ Section "mipoco (required)" SecMain
   WriteRegStr HKCU "Software\${APP}" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
+  ; Register the toast notification app id: gives "mipoco" a friendly name and
+  ; icon in Settings → System → Notifications (and a working per-app on/off).
+  WriteRegStr HKCU "Software\Classes\AppUserModelId\${AUMID}" "DisplayName" "${APP}"
+  WriteRegStr HKCU "Software\Classes\AppUserModelId\${AUMID}" "IconUri" "$INSTDIR\mipoco.ico"
+
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${APP}"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${PUBLISHER}"
@@ -76,4 +84,5 @@ Section "Uninstall"
   Delete "$DESKTOP\${APP}.lnk"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegKey HKCU "Software\${APP}"
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\${AUMID}"
 SectionEnd

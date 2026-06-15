@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
@@ -16,6 +16,7 @@ use crate::event::{AppEvent, encode_key, encode_mouse};
 use crate::exec::{self, ExecOutcome};
 use crate::explorer::Explorer;
 use crate::layout::{NavDir, PaneNode, SplitDir, Tab, directional_focus};
+use crate::notify::{self, AttentionKind, IpcServer};
 use crate::pty::{PtySession, SessionId};
 use crate::setup::{Step, Wizard};
 use crate::update::{self, UpdateInfo};
@@ -81,6 +82,10 @@ pub const SETTINGS: &[SettingDef] = &[
     },
     SettingDef {
         label: "check for updates",
+        kind: SettingKind::Bool,
+    },
+    SettingDef {
+        label: "desktop notifications",
         kind: SettingKind::Bool,
     },
     SettingDef {
@@ -172,8 +177,15 @@ pub struct App {
     pub updating: bool,
     pub status_msg: Option<String>,
     pub should_quit: bool,
+    /// Panes that have signalled they need attention (permission / finished);
+    /// drives the tab-bar dot and pane border, cleared when the pane is focused.
+    pub attention: HashSet<SessionId>,
     next_id: SessionId,
     tx: Sender<AppEvent>,
+    /// Loopback listener + token for Claude hooks; `None` if it failed to bind.
+    ipc: Option<IpcServer>,
+    /// Host terminal window, captured at startup, raised on notification click.
+    win: notify::window::Handle,
     term_size: (u16, u16),
 }
 
@@ -181,6 +193,10 @@ impl App {
     pub fn new(config: Config, tx: Sender<AppEvent>, term_size: (u16, u16)) -> Result<Self> {
         let explorer_visible = config.show_explorer_on_start;
         let explorer = Explorer::new(config.explorer_roots.clone());
+        // Bind the hook listener (best-effort) and remember the host terminal
+        // window before any pane is spawned so panes inherit the right env.
+        let ipc = config.notifications.then(|| IpcServer::start(tx.clone())).flatten();
+        let win = notify::window::capture();
         let mut app = Self {
             config,
             sessions: HashMap::new(),
@@ -207,8 +223,11 @@ impl App {
             updating: false,
             status_msg: None,
             should_quit: false,
+            attention: HashSet::new(),
             next_id: 0,
             tx,
+            ipc,
+            win,
             term_size,
         };
         let (cmd, title) = app.shell_cmd(None);
@@ -279,6 +298,13 @@ impl App {
         self.pane_rects = active_rects;
         self.bordered = active_bordered;
 
+        // the focused pane is being looked at: drop any attention marker on it
+        if self.focus == Focus::Pane
+            && let Some(f) = self.tabs.get(self.active_tab).map(|t| t.focus)
+        {
+            self.attention.remove(&f);
+        }
+
         // visible sessions are about to be rendered: re-arm their output events
         for (id, _) in &self.pane_rects {
             if let Some(s) = self.sessions.get(id) {
@@ -309,6 +335,8 @@ impl App {
                     self.remove_session(id);
                 }
             }
+            AppEvent::Attention { pane, kind, message } => self.on_attention(pane, kind, message),
+            AppEvent::FocusPane(pane) => self.focus_pane(pane),
             AppEvent::UpdateChecked(info) => self.update = Some(*info),
             AppEvent::UpdateResult(res) => {
                 self.updating = false;
@@ -479,6 +507,7 @@ impl App {
             6 => self.config.viewer.label().to_string(),
             7 => self.config.pager.clone(),
             8 => self.config.check_updates.to_string(),
+            9 => self.config.notifications.to_string(),
             _ => String::new(),
         }
     }
@@ -547,6 +576,26 @@ impl App {
             }
             1 => self.config.auto_close_exited = !self.config.auto_close_exited,
             8 => self.config.check_updates = !self.config.check_updates,
+            9 => {
+                self.config.notifications = !self.config.notifications;
+                let res = if self.config.notifications {
+                    notify::install_hooks()
+                } else {
+                    notify::uninstall_hooks()
+                };
+                if let Err(e) = res {
+                    self.status_msg = Some(format!("notify hooks: {e}"));
+                } else {
+                    self.status_msg = Some(
+                        if self.config.notifications {
+                            "notifications on — restart panes to take effect"
+                        } else {
+                            "notifications off"
+                        }
+                        .into(),
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -557,9 +606,9 @@ impl App {
         }
     }
 
-    /// Run the action for an `Action`-kind settings row (index 9: re-run setup).
+    /// Run the action for an `Action`-kind settings row (index 10: re-run setup).
     fn run_setting_action(&mut self) {
-        if self.settings_sel == 9 {
+        if self.settings_sel == 10 {
             self.settings_open = false;
             self.settings_edit = None;
             self.open_setup_wizard();
@@ -1324,11 +1373,17 @@ impl App {
 
     fn spawn_session(
         &mut self,
-        cmd: CommandBuilder,
+        mut cmd: CommandBuilder,
         title: String,
         auto_close: bool,
     ) -> Result<SessionId> {
         let id = self.alloc_id();
+        // Tag the pane so its Claude hooks can report attention back to us.
+        if let Some(ipc) = &self.ipc {
+            cmd.env("MIPOCO_SOCK", &ipc.addr);
+            cmd.env("MIPOCO_TOKEN", &ipc.token);
+            cmd.env("MIPOCO_PANE", id.to_string());
+        }
         let size = self.pane_size_hint();
         let sess = PtySession::spawn(
             id,
@@ -1559,6 +1614,39 @@ impl App {
             self.focus = Focus::Pane;
         } else {
             self.viewers.remove(&id);
+        }
+    }
+
+    // ---- attention notifications ------------------------------------------
+
+    /// A pane reported it needs attention. Mark it and pop a desktop
+    /// notification — unless you're already looking right at it.
+    fn on_attention(&mut self, pane: SessionId, kind: AttentionKind, message: String) {
+        if !self.config.notifications || !self.sessions.contains_key(&pane) {
+            return;
+        }
+        let looking = self.focus == Focus::Pane
+            && self.tabs.get(self.active_tab).map(|t| t.focus) == Some(pane);
+        if looking {
+            return;
+        }
+        self.attention.insert(pane);
+        let title = self
+            .sessions
+            .get(&pane)
+            .map(|s| s.title.clone())
+            .unwrap_or_default();
+        notify::show(kind, &title, &message, pane, self.tx.clone());
+    }
+
+    /// Jump to the tab + pane behind a clicked notification and raise the window.
+    fn focus_pane(&mut self, pane: SessionId) {
+        if let Some(ti) = self.tabs.iter().position(|t| t.root.contains(pane)) {
+            self.active_tab = ti;
+            self.tabs[ti].focus = pane;
+            self.focus = Focus::Pane;
+            self.attention.remove(&pane);
+            notify::window::raise(&self.win);
         }
     }
 

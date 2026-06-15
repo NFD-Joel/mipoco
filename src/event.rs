@@ -5,6 +5,7 @@ use crossterm::event::{
 };
 use vt100::{MouseProtocolEncoding, MouseProtocolMode};
 
+use crate::notify::AttentionKind;
 use crate::pty::SessionId;
 use crate::update::UpdateInfo;
 
@@ -15,6 +16,15 @@ pub enum AppEvent {
     PtyOutput,
     /// A session's reader hit EOF: the child exited.
     PtyExited(SessionId),
+    /// A Claude pane needs attention (asked for permission / finished its turn),
+    /// reported via its hook. Carries the pane id so we can focus it.
+    Attention {
+        pane: SessionId,
+        kind: AttentionKind,
+        message: String,
+    },
+    /// A notification was clicked: focus this pane and raise the window.
+    FocusPane(SessionId),
     /// Startup update check finished; `Some` when a newer release exists.
     UpdateChecked(Box<UpdateInfo>),
     /// A self-update attempt finished (Ok message / Err message).

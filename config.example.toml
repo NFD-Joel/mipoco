@@ -20,6 +20,13 @@ setup_complete = false
 # When one exists, Alt+u opens an upgrade / changelog overlay.
 check_updates = true
 
+# Desktop notification when a Claude pane asks for permission or finishes its
+# turn. Clicking it brings mipoco forward and jumps to that exact tab + pane.
+# Enabling installs Notification/Stop hooks into ~/.claude/settings.json (a
+# no-op whenever Claude runs outside mipoco); a tab dot (●) marks panes that
+# need you. Toggle live from settings (Alt+o).
+notifications = true
+
 # Open the file explorer panel at startup.
 show_explorer_on_start = false
 

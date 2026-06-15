@@ -137,13 +137,20 @@ fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
     let mut used = 0usize;
     for (i, tab) in app.tabs.iter().enumerate() {
         let active = i == app.active_tab;
+        let attention = tab.leaves().iter().any(|id| app.attention.contains(id));
         let activity = !active
             && tab.leaves().iter().any(|id| {
                 app.sessions
                     .get(id)
                     .is_some_and(|s| s.dirty.load(Ordering::Relaxed))
             });
-        let marker = if activity { "*" } else { "" };
+        let marker = if attention {
+            " ●"
+        } else if activity {
+            "*"
+        } else {
+            ""
+        };
         let dir = app
             .sessions
             .get(&tab.focus)
@@ -158,6 +165,8 @@ fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Black)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
+        } else if attention {
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else if activity {
             Style::new().fg(Color::Yellow)
         } else {
