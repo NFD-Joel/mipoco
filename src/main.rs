@@ -6,6 +6,7 @@ mod exec;
 mod explorer;
 mod layout;
 mod notify;
+mod persist;
 mod pty;
 mod setup;
 mod ui;
@@ -104,19 +105,48 @@ fn run(
         });
     }
 
+    // Session-restore snapshot state: only touch disk when the serialized layout
+    // actually changed (diff guard), and at most once a second (throttle) so PTY
+    // output bursts don't thrash it.
+    let mut last_saved = String::new();
+    let mut last_save = std::time::Instant::now();
+
     loop {
         let size = terminal.size()?;
         app.sync_layout(size.width, size.height);
         terminal.draw(|f| ui::draw(f, &mut app))?;
 
-        let Ok(ev) = rx.recv() else { break };
-        app.handle_event(ev);
-        // drain pending events so output bursts coalesce into one redraw
-        while !app.should_quit
-            && let Ok(ev) = rx.try_recv()
-        {
-            app.handle_event(ev);
+        // Wake at least once a second even when idle so a pending session save
+        // (e.g. a `cd` in a shell just before the app goes idle) still flushes.
+        match rx.recv_timeout(std::time::Duration::from_millis(500)) {
+            Ok(ev) => {
+                app.handle_event(ev);
+                // drain pending events so output bursts coalesce into one redraw
+                while !app.should_quit
+                    && let Ok(ev) = rx.try_recv()
+                {
+                    app.handle_event(ev);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
+
+        // Persist the layout for "continue where you left off". We never write an
+        // empty snapshot, so closing all panes / a SIGKILL on shutdown leaves the
+        // last real layout intact for the next launch.
+        if app.config.restore_session
+            && last_save.elapsed() >= std::time::Duration::from_secs(1)
+        {
+            if let Some(json) = app.snapshot_json()
+                && json != last_saved
+            {
+                let _ = persist::save_str(&json);
+                last_saved = json;
+            }
+            last_save = std::time::Instant::now();
+        }
+
         if app.should_quit {
             break;
         }

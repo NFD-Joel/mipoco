@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 use crate::pty::SessionId;
 
 /// Split axis. Horizontal = panes side by side (vertical divider).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum SplitDir {
     Horizontal,
     Vertical,

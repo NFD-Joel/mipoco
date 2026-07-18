@@ -17,6 +17,7 @@ use crate::exec::{self, ExecOutcome};
 use crate::explorer::Explorer;
 use crate::layout::{NavDir, PaneNode, SplitDir, Tab, directional_focus};
 use crate::notify::{self, AttentionKind, IpcServer};
+use crate::persist::{self, PaneKind};
 use crate::pty::{PtySession, SessionId};
 use crate::setup::{Step, Wizard};
 use crate::update::{self, UpdateInfo};
@@ -89,6 +90,10 @@ pub const SETTINGS: &[SettingDef] = &[
         kind: SettingKind::Bool,
     },
     SettingDef {
+        label: "restore last session",
+        kind: SettingKind::Bool,
+    },
+    SettingDef {
         label: "re-run setup wizard",
         kind: SettingKind::Action,
     },
@@ -149,6 +154,10 @@ pub struct App {
     pub sessions: HashMap<SessionId, PtySession>,
     /// Built-in viewer panes, keyed by the same id space as `sessions`.
     pub viewers: HashMap<SessionId, Viewer>,
+    /// How each restorable pane was created (shell / claude / builtin viewer),
+    /// keyed by session id. Transient panes (runner/pager/external viewer) are
+    /// absent. Drives the session-restore snapshot.
+    pub session_meta: HashMap<SessionId, PaneKind>,
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
     pub focus: Focus,
@@ -201,6 +210,7 @@ impl App {
             config,
             sessions: HashMap::new(),
             viewers: HashMap::new(),
+            session_meta: HashMap::new(),
             tabs: Vec::new(),
             active_tab: 0,
             focus: Focus::Pane,
@@ -230,9 +240,17 @@ impl App {
             win,
             term_size,
         };
-        let (cmd, title) = app.shell_cmd(None);
-        let id = app.spawn_session(cmd, title.clone(), false)?;
-        app.tabs.push(Tab::new(title, id));
+        // Restore the previous tabs/splits/panes when enabled ("continue where
+        // you left off"). Skipped on first run (nothing saved yet). Falls back
+        // to a single fresh shell if there is no usable snapshot.
+        let restored = app.config.restore_session
+            && app.config.setup_complete
+            && app.restore_session(persist::load());
+        if !restored {
+            let (cmd, title) = app.shell_cmd(None);
+            let id = app.spawn_session(cmd, title.clone(), false, Some(PaneKind::Shell))?;
+            app.tabs.push(Tab::new(title, id));
+        }
         Ok(app)
     }
 
@@ -401,7 +419,7 @@ impl App {
                 KeyCode::Char('t') => {
                     let cwd = self.focused_cwd();
                     let (cmd, title) = self.shell_cmd(cwd.as_deref());
-                    self.new_tab_with(cmd, title);
+                    self.new_tab_with(cmd, title, Some(PaneKind::Shell));
                 }
                 KeyCode::Char('o') => {
                     self.settings_open = true;
@@ -422,17 +440,29 @@ impl App {
                 KeyCode::Char('s') => {
                     let cwd = self.focused_cwd();
                     let (cmd, title) = self.shell_cmd(cwd.as_deref());
-                    self.split_with(SPLIT_DIR, cmd, title, false);
+                    self.split_with(SPLIT_DIR, cmd, title, false, Some(PaneKind::Shell));
                 }
                 KeyCode::Char('c') => {
                     let cwd = self.focused_cwd();
                     let (cmd, title) = self.claude_cmd(cwd.as_deref(), false);
-                    self.split_with(SPLIT_DIR, cmd, title, false);
+                    self.split_with(
+                        SPLIT_DIR,
+                        cmd,
+                        title,
+                        false,
+                        Some(PaneKind::Claude { bypass: false }),
+                    );
                 }
                 KeyCode::Char('b') => {
                     let cwd = self.focused_cwd();
                     let (cmd, title) = self.claude_cmd(cwd.as_deref(), true);
-                    self.split_with(SPLIT_DIR, cmd, title, false);
+                    self.split_with(
+                        SPLIT_DIR,
+                        cmd,
+                        title,
+                        false,
+                        Some(PaneKind::Claude { bypass: true }),
+                    );
                 }
                 KeyCode::Char('y') => self.enter_copy_mode(),
                 KeyCode::Char('u') => self.open_update_overlay(),
@@ -508,6 +538,7 @@ impl App {
             7 => self.config.pager.clone(),
             8 => self.config.check_updates.to_string(),
             9 => self.config.notifications.to_string(),
+            10 => self.config.restore_session.to_string(),
             _ => String::new(),
         }
     }
@@ -596,6 +627,7 @@ impl App {
                     );
                 }
             }
+            10 => self.config.restore_session = !self.config.restore_session,
             _ => {}
         }
     }
@@ -606,9 +638,9 @@ impl App {
         }
     }
 
-    /// Run the action for an `Action`-kind settings row (index 10: re-run setup).
+    /// Run the action for an `Action`-kind settings row (index 11: re-run setup).
     fn run_setting_action(&mut self) {
-        if self.settings_sel == 10 {
+        if self.settings_sel == 11 {
             self.settings_open = false;
             self.settings_edit = None;
             self.open_setup_wizard();
@@ -893,17 +925,17 @@ impl App {
             KeyCode::Char('s') => {
                 let d = self.explorer.target_dir();
                 let (cmd, title) = self.shell_cmd(Some(&d));
-                self.new_tab_with(cmd, title);
+                self.new_tab_with(cmd, title, Some(PaneKind::Shell));
             }
             KeyCode::Char('c') => {
                 let d = self.explorer.target_dir();
                 let (cmd, title) = self.claude_cmd(Some(&d), false);
-                self.new_tab_with(cmd, title);
+                self.new_tab_with(cmd, title, Some(PaneKind::Claude { bypass: false }));
             }
             KeyCode::Char('b') => {
                 let d = self.explorer.target_dir();
                 let (cmd, title) = self.claude_cmd(Some(&d), true);
-                self.new_tab_with(cmd, title);
+                self.new_tab_with(cmd, title, Some(PaneKind::Claude { bypass: true }));
             }
             KeyCode::Char('v') => {
                 if let Some(e) = self.explorer.selected_entry()
@@ -916,17 +948,29 @@ impl App {
             KeyCode::Char('S') => {
                 let d = self.explorer.target_dir();
                 let (cmd, title) = self.shell_cmd(Some(&d));
-                self.split_with(SPLIT_DIR, cmd, title, false);
+                self.split_with(SPLIT_DIR, cmd, title, false, Some(PaneKind::Shell));
             }
             KeyCode::Char('C') => {
                 let d = self.explorer.target_dir();
                 let (cmd, title) = self.claude_cmd(Some(&d), false);
-                self.split_with(SPLIT_DIR, cmd, title, false);
+                self.split_with(
+                    SPLIT_DIR,
+                    cmd,
+                    title,
+                    false,
+                    Some(PaneKind::Claude { bypass: false }),
+                );
             }
             KeyCode::Char('B') => {
                 let d = self.explorer.target_dir();
                 let (cmd, title) = self.claude_cmd(Some(&d), true);
-                self.split_with(SPLIT_DIR, cmd, title, false);
+                self.split_with(
+                    SPLIT_DIR,
+                    cmd,
+                    title,
+                    false,
+                    Some(PaneKind::Claude { bypass: true }),
+                );
             }
             KeyCode::Char('.') => self.explorer.toggle_hidden(),
             KeyCode::Char('R') => self.explorer.rebuild(),
@@ -1342,7 +1386,25 @@ impl App {
     /// mipoco is launched from a desktop icon, where that PATH addition is absent
     /// and a bare `claude` would fail to spawn.
     fn claude_cmd(&self, cwd: Option<&Path>, bypass: bool) -> (CommandBuilder, String) {
+        self.claude_cmd_inner(cwd, bypass, false)
+    }
+
+    /// Like `claude_cmd`, but adds `--continue` so claude resumes the most recent
+    /// conversation in `cwd`. Used when restoring a session on startup.
+    fn claude_cmd_resume(&self, cwd: Option<&Path>, bypass: bool) -> (CommandBuilder, String) {
+        self.claude_cmd_inner(cwd, bypass, true)
+    }
+
+    fn claude_cmd_inner(
+        &self,
+        cwd: Option<&Path>,
+        bypass: bool,
+        resume: bool,
+    ) -> (CommandBuilder, String) {
         let mut line = self.config.claude_command.clone();
+        if resume {
+            line.push_str(" --continue");
+        }
         if bypass {
             line.push_str(" --dangerously-skip-permissions");
         }
@@ -1376,6 +1438,7 @@ impl App {
         mut cmd: CommandBuilder,
         title: String,
         auto_close: bool,
+        meta: Option<PaneKind>,
     ) -> Result<SessionId> {
         let id = self.alloc_id();
         // Tag the pane so its Claude hooks can report attention back to us.
@@ -1395,11 +1458,14 @@ impl App {
             self.tx.clone(),
         )?;
         self.sessions.insert(id, sess);
+        if let Some(m) = meta {
+            self.session_meta.insert(id, m);
+        }
         Ok(id)
     }
 
-    fn new_tab_with(&mut self, cmd: CommandBuilder, title: String) {
-        match self.spawn_session(cmd, title.clone(), false) {
+    fn new_tab_with(&mut self, cmd: CommandBuilder, title: String, meta: Option<PaneKind>) {
+        match self.spawn_session(cmd, title.clone(), false, meta) {
             Ok(id) => {
                 self.tabs.push(Tab::new(title, id));
                 self.active_tab = self.tabs.len() - 1;
@@ -1409,12 +1475,19 @@ impl App {
         }
     }
 
-    fn split_with(&mut self, dir: SplitDir, cmd: CommandBuilder, title: String, auto_close: bool) {
+    fn split_with(
+        &mut self,
+        dir: SplitDir,
+        cmd: CommandBuilder,
+        title: String,
+        auto_close: bool,
+        meta: Option<PaneKind>,
+    ) {
         if self.tabs.is_empty() {
-            self.new_tab_with(cmd, title);
+            self.new_tab_with(cmd, title, meta);
             return;
         }
-        match self.spawn_session(cmd, title, auto_close) {
+        match self.spawn_session(cmd, title, auto_close, meta) {
             Ok(id) => {
                 let tab = &mut self.tabs[self.active_tab];
                 if tab.root.split(tab.focus, dir, id) {
@@ -1437,6 +1510,7 @@ impl App {
         for id in tab.leaves() {
             self.sessions.remove(&id);
             self.viewers.remove(&id);
+            self.session_meta.remove(&id);
         }
         if self.tabs.is_empty() {
             self.should_quit = true;
@@ -1456,6 +1530,7 @@ impl App {
     pub fn remove_session(&mut self, id: SessionId) {
         self.sessions.remove(&id);
         self.viewers.remove(&id);
+        self.session_meta.remove(&id);
         let Some(ti) = self.tabs.iter().position(|t| t.root.contains(id)) else {
             return;
         };
@@ -1553,7 +1628,7 @@ impl App {
                 self.status_msg = Some(format!("opened {name} with system handler"));
             }
             Ok(ExecOutcome::Run { cmd, title }) => {
-                self.split_with(SPLIT_DIR, cmd, title, true);
+                self.split_with(SPLIT_DIR, cmd, title, true, None);
             }
             Ok(ExecOutcome::View(p)) => self.view_file(&p),
             Err(e) => self.status_msg = Some(format!("exec failed: {e}")),
@@ -1568,19 +1643,24 @@ impl App {
             ViewerMode::Builtin => self.open_builtin_viewer(path),
             ViewerMode::External => {
                 let (cmd, title) = exec::view(path, &self.config);
-                self.split_with(SPLIT_DIR, cmd, title, true);
+                self.split_with(SPLIT_DIR, cmd, title, true, None);
             }
         }
     }
 
     fn open_builtin_viewer(&mut self, path: &Path) {
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(e) => {
-                self.status_msg = Some(format!("cannot view {}: {e}", path.display()));
-                return;
-            }
+        let Some(id) = self.create_viewer(path) else {
+            self.status_msg = Some(format!("cannot view {}", path.display()));
+            return;
         };
+        self.place_viewer(id);
+    }
+
+    /// Read a file into a built-in viewer and register it (with its path, so the
+    /// viewer can be restored on the next launch), returning the new id. Does
+    /// NOT place it in the layout — see `place_viewer`.
+    fn create_viewer(&mut self, path: &Path) -> Option<SessionId> {
+        let bytes = std::fs::read(path).ok()?;
         let content = String::from_utf8_lossy(&bytes);
         let title = path
             .file_name()
@@ -1592,15 +1672,25 @@ impl App {
             .map(str::to_lowercase)
             .unwrap_or_default();
         let viewer = Viewer::new(title, &content, WrapMode::for_ext(&ext));
-        self.spawn_viewer(viewer);
+        let id = self.alloc_id();
+        self.viewers.insert(id, viewer);
+        self.session_meta.insert(
+            id,
+            PaneKind::Viewer {
+                path: path.to_path_buf(),
+            },
+        );
+        Some(id)
     }
 
-    /// Place a built-in viewer as a split next to the focused pane (or in a new
-    /// tab when none exists).
-    fn spawn_viewer(&mut self, viewer: Viewer) {
-        let id = self.alloc_id();
-        let name = viewer.title.clone();
-        self.viewers.insert(id, viewer);
+    /// Place an existing viewer id as a split next to the focused pane (or in a
+    /// new tab when none exists).
+    fn place_viewer(&mut self, id: SessionId) {
+        let name = self
+            .viewers
+            .get(&id)
+            .map(|v| v.title.clone())
+            .unwrap_or_default();
         if self.tabs.is_empty() {
             self.tabs.push(Tab::new(name, id));
             self.active_tab = self.tabs.len() - 1;
@@ -1614,6 +1704,154 @@ impl App {
             self.focus = Focus::Pane;
         } else {
             self.viewers.remove(&id);
+            self.session_meta.remove(&id);
+        }
+    }
+
+    // ---- session restore ("continue where you left off") ------------------
+
+    /// Serialize the current layout to a JSON snapshot for restore-on-restart.
+    /// Returns None when there is nothing worth saving (no restorable panes) so
+    /// callers never overwrite a good snapshot with an empty one.
+    pub fn snapshot_json(&self) -> Option<String> {
+        let snap = self.snapshot_session();
+        if snap.tabs.is_empty() {
+            return None;
+        }
+        serde_json::to_string_pretty(&snap).ok()
+    }
+
+    fn snapshot_session(&self) -> persist::SavedSession {
+        let mut tabs = Vec::new();
+        for tab in &self.tabs {
+            if let Some(root) = self.snapshot_node(&tab.root, tab.focus) {
+                tabs.push(persist::SavedTab {
+                    name: tab.name.clone(),
+                    zoomed: tab.zoomed,
+                    root,
+                });
+            }
+        }
+        let active_tab = if tabs.is_empty() {
+            0
+        } else {
+            self.active_tab.min(tabs.len() - 1)
+        };
+        persist::SavedSession {
+            tabs,
+            active_tab,
+            explorer_visible: self.explorer_visible,
+        }
+    }
+
+    /// Reduce a live layout node to its serializable mirror. Transient panes
+    /// (no session_meta) are dropped and their split collapses to the sibling.
+    fn snapshot_node(&self, node: &PaneNode, focus: SessionId) -> Option<persist::SavedNode> {
+        match node {
+            PaneNode::Leaf(id) => {
+                let kind = self.session_meta.get(id)?.clone();
+                let cwd = self.sessions.get(id).and_then(|s| s.cwd());
+                Some(persist::SavedNode::Leaf {
+                    pane: kind,
+                    cwd,
+                    focused: *id == focus,
+                })
+            }
+            PaneNode::Split {
+                dir,
+                ratio,
+                first,
+                second,
+            } => {
+                let f = self.snapshot_node(first, focus);
+                let s = self.snapshot_node(second, focus);
+                match (f, s) {
+                    (Some(f), Some(s)) => Some(persist::SavedNode::Split {
+                        dir: *dir,
+                        ratio: *ratio,
+                        first: Box::new(f),
+                        second: Box::new(s),
+                    }),
+                    (Some(n), None) | (None, Some(n)) => Some(n),
+                    (None, None) => None,
+                }
+            }
+        }
+    }
+
+    /// Rebuild tabs/panes from a saved snapshot. Returns true when at least one
+    /// tab was restored (so the caller can fall back to a fresh shell otherwise).
+    fn restore_session(&mut self, saved: persist::SavedSession) -> bool {
+        for stab in saved.tabs {
+            let mut focus_id = None;
+            if let Some(root) = self.build_restore_node(&stab.root, &mut focus_id) {
+                let focus = focus_id.unwrap_or_else(|| root.first_leaf());
+                self.tabs.push(Tab {
+                    name: stab.name,
+                    root,
+                    focus,
+                    zoomed: stab.zoomed,
+                });
+            }
+        }
+        if self.tabs.is_empty() {
+            return false;
+        }
+        self.active_tab = saved.active_tab.min(self.tabs.len() - 1);
+        self.explorer_visible = saved.explorer_visible;
+        true
+    }
+
+    fn build_restore_node(
+        &mut self,
+        node: &persist::SavedNode,
+        focus_out: &mut Option<SessionId>,
+    ) -> Option<PaneNode> {
+        match node {
+            persist::SavedNode::Leaf { pane, cwd, focused } => {
+                let id = self.spawn_restored_pane(pane, cwd.as_deref())?;
+                if *focused {
+                    *focus_out = Some(id);
+                }
+                Some(PaneNode::Leaf(id))
+            }
+            persist::SavedNode::Split {
+                dir,
+                ratio,
+                first,
+                second,
+            } => {
+                let f = self.build_restore_node(first, focus_out);
+                let s = self.build_restore_node(second, focus_out);
+                match (f, s) {
+                    (Some(f), Some(s)) => Some(PaneNode::Split {
+                        dir: *dir,
+                        ratio: *ratio,
+                        first: Box::new(f),
+                        second: Box::new(s),
+                    }),
+                    (Some(n), None) | (None, Some(n)) => Some(n),
+                    (None, None) => None,
+                }
+            }
+        }
+    }
+
+    /// Recreate a single restored pane, returning its new id (None if it can't
+    /// be respawned, e.g. a viewer whose file is gone).
+    fn spawn_restored_pane(&mut self, kind: &PaneKind, cwd: Option<&Path>) -> Option<SessionId> {
+        match kind {
+            PaneKind::Shell => {
+                let (cmd, title) = self.shell_cmd(cwd);
+                self.spawn_session(cmd, title, false, Some(PaneKind::Shell))
+                    .ok()
+            }
+            PaneKind::Claude { bypass } => {
+                let (cmd, title) = self.claude_cmd_resume(cwd, *bypass);
+                self.spawn_session(cmd, title, false, Some(PaneKind::Claude { bypass: *bypass }))
+                    .ok()
+            }
+            PaneKind::Viewer { path } => self.create_viewer(path),
         }
     }
 

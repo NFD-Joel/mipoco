@@ -43,6 +43,9 @@ pub struct Config {
     pub explorer_roots: Vec<PathBuf>,
     /// Check GitHub for a newer release on startup and offer to upgrade.
     pub check_updates: bool,
+    /// Reopen the previous tabs/splits/panes on startup ("continue where you
+    /// left off"). Claude panes resume their conversation via `--continue`.
+    pub restore_session: bool,
     /// Pop a desktop notification when a Claude pane asks for permission or
     /// finishes. Installs hooks into `~/.claude/settings.json` when enabled.
     pub notifications: bool,
@@ -75,6 +78,7 @@ impl Default for Config {
             setup_complete: false,
             explorer_roots: default_explorer_roots(),
             check_updates: true,
+            restore_session: true,
             notifications: true,
             show_explorer_on_start: false,
             claude_command: "claude".into(),

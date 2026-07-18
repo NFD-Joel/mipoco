@@ -169,8 +169,24 @@ back, `Esc` skips with defaults. Re-run it any time from the settings overlay.
 
 Press `Alt+o` for the in-app settings overlay — explorer-on-start, explorer
 width, scrollback, shell, claude command, text viewer (builtin/external),
-external pager, auto-close, check-for-updates, re-run setup. Changes apply
-immediately and are written to the config file.
+external pager, auto-close, check-for-updates, desktop notifications,
+restore-last-session, re-run setup. Changes apply immediately and are written to
+the config file.
+
+### Session restore
+
+With `restore_session` on (the default), mipoco reopens your previous tabs,
+splits and panes on the next launch — "continue where you left off", like a
+browser. Each pane's working directory is restored, and **Claude panes resume
+their conversation** by relaunching with `claude --continue`. The layout is
+saved continuously to `~/.config/mipoco/session.json` and never overwritten with
+an empty snapshot, so it survives closing the window or a power-off.
+
+What isn't restored: a shell's live scrollback / on-screen output (a restored
+shell is a fresh process in the saved directory), and transient runner/pager
+view panes. If a Claude pane's directory has no prior conversation, `--continue`
+simply starts fresh. Toggle it off from settings (`Alt+o`) to always start with a
+single shell.
 
 ### Explorer access
 
@@ -208,6 +224,7 @@ See [config.example.toml](config.example.toml):
 setup_complete = true            # set by the first-run wizard; false re-runs it
 explorer_roots = ["~/projects"]  # folders the explorer may browse (and its boundary)
 check_updates = true             # check GitHub for a newer release on startup
+restore_session = true           # reopen last tabs/splits/panes (claude --continue)
 show_explorer_on_start = false   # open the file explorer panel at startup
 claude_command = "claude"        # what the c/C and Alt+c actions run
 viewer = "builtin"               # text viewer: "builtin" (in-app) or "external"
